@@ -1,103 +1,24 @@
-import { api } from "../services/api.js";
-import { money, date } from "../services/format.js";
-import UserCard from "../components/common/UserCard.jsx";
-export default function Users({
-  admin,
-  data,
-  users,
-  vehicles,
-  run,
-  refresh,
-  submit,
-  detail,
-  audit,
-  M,
-}) {
-  return (
-    <>
-      <h1>Usuarios y permisos</h1>
-      <p>
-        El correo debe estar configurado para verificar los usuarios y enviar
-        códigos de doble factor.
-      </p>
-      <details>
-        <summary>Crear usuario</summary>
-        <form
-          className="grid"
-          onSubmit={(e) => {
-            e.preventDefault();
-            let form = e.currentTarget,
-              f = new FormData(form);
-            run(async () => {
-              await api("/users", {
-                method: "POST",
-                body: {
-                  name: f.get("name"),
-                  email: f.get("email"),
-                  password: f.get("password"),
-                  role: f.get("role"),
-                  two_factor: f.has("two_factor"),
-                  permissions: f.getAll("permissions"),
-                },
-              });
-              form.reset();
-              await refresh();
-              M(
-                "Usuario creado. Al ingresar recibirá un código para verificar su correo.",
-              );
-            });
-          }}
-        >
-          <label>
-            Nombre
-            <input name="name" required />
-          </label>
-          <label>
-            Correo
-            <input name="email" type="email" required />
-          </label>
-          <label>
-            Contraseña inicial
-            <input name="password" type="password" minLength="12" required />
-          </label>
-          <label>
-            Rol
-            <select name="role">
-              <option value="conductor">Conductor</option>
-              <option value="usuario">Usuario</option>
-              <option value="admin">Administrador</option>
-            </select>
-          </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              name="permissions"
-              value="viajes"
-              defaultChecked
-            />
-            Viajes
-          </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              name="permissions"
-              value="reportes"
-              defaultChecked
-            />
-            Reportes
-          </label>
-          <label className="check">
-            <input type="checkbox" name="two_factor" />
-            Doble factor por correo
-          </label>
-          <button>Crear usuario</button>
-        </form>
-      </details>
-      <div className="cards">
-        {users.map((u) => (
-          <UserCard key={u.id} user={u} run={run} refresh={refresh} />
-        ))}
-      </div>
-    </>
-  );
+import {useCallback,useState} from 'react';
+import UserAvatar from '../components/common/UserAvatar.jsx';
+import {api} from '../services/api.js';import {date} from '../services/format.js';import Modal from '../components/common/Modal.jsx';import ActionIcon from '../components/common/ActionIcon.jsx';import './styles/Users.css';
+const roleName={admin:'Administrador',conductor:'Conductor',usuario:'Usuario'};
+const actionName={inicio_sesion:'Inicio de sesión',cierre_sesion:'Cierre de sesión',recuperar_contrasena:'Recuperó su contraseña',activar_cuenta:'Activó su cuenta',actualizar_perfil:'Actualizó su perfil',reenviar_invitacion:'Reenvió una invitación',crear_usuario:'Creó un usuario',actualizar_usuario:'Actualizó un usuario',crear_vehiculo:'Registró un vehículo',editar_vehiculo:'Editó un vehículo',crear_viaje:'Creó un viaje',registrar_evento:'Registró un punto',registrar_gasto:'Registró un gasto',subir_archivo:'Subió un archivo',descargar_archivo:'Descargó un archivo',eliminar_archivos:'Eliminó archivos'};
+const SvgButton=({icon,label,onClick,disabled})=><button type="button" className="icon-action" aria-label={label} title={label} onClick={onClick} disabled={disabled}><ActionIcon name={icon}/></button>;
+// El color y el texto representan el estado actual; el cambio requiere confirmación.
+const StateButton=({label,active,user,onClick})=>{const status=active?'Activo':'Inactivo';const action=active?'Desactivar':'Activar';const description=`${label} ${status.toLowerCase()}. ${action} ${label.toLowerCase()} de ${user}`;return <button type="button" className={'user-state-switch '+(active?'is-on':'is-off')} aria-label={description} title={description} aria-pressed={active} onClick={onClick}><span className="state-label">{label}</span><span className="state-switch-line"><span className="switch-track" aria-hidden="true"><span className="switch-knob"/></span><span className="state-text">{status}</span></span></button>};
+export default function Users({users,run,refresh,M,currentUser,clearSession,message}){
+ const [modal,setModal]=useState(null),[selected,setSelected]=useState(null),[records,setRecords]=useState([]),[cursor,setCursor]=useState(null),[historyLoading,H]=useState(false),[search,Q]=useState('');
+ const close=useCallback(()=>{setModal(null);setSelected(null);setRecords([]);setCursor(null)},[]);
+ const list=users.filter(u=>`${u.name} ${u.last_name||''} ${u.email} ${u.role}`.toLocaleLowerCase().includes(search.toLocaleLowerCase().trim()));
+ async function openHistory(u){setSelected(u);setRecords([]);setCursor(null);setModal('history');H(true);try{let result=await api(`/users/${u.id}/activity`);setRecords(result.items);setCursor(result.next_before)}catch(e){M(e.message)}finally{H(false)}}
+ async function more(){if(!selected||!cursor)return;H(true);try{let result=await api(`/users/${selected.id}/activity?before=${encodeURIComponent(cursor)}`);setRecords(x=>[...x,...result.items]);setCursor(result.next_before)}catch(e){M(e.message)}finally{H(false)}}
+ const ask=(kind,u)=>{setSelected(u);setModal(kind)};
+ function update(data){run(async()=>{await api('/users/'+selected.id,{method:'PATCH',body:data});close();if(String(selected.id)===String(currentUser?.id)){clearSession('Tu cuenta fue actualizada. Ingresa nuevamente.');return}await refresh();M('Usuario actualizado correctamente')},'Actualizando usuario…')}
+ return <div className="users-page"><div className="users-header"><div><span className="users-kicker">ADMINISTRACIÓN</span><h1>Usuarios</h1><p>Administra las cuentas, sus permisos y su actividad.</p></div><button type="button" className="users-add" onClick={()=>setModal('create')}><ActionIcon name="plus"/> Nuevo usuario</button></div><div className="users-toolbar"><strong>{users.length} {users.length===1?'usuario':'usuarios'}</strong><label className="users-search"><span className="sr-only">Buscar usuario</span><input value={search} onChange={e=>Q(e.target.value)} placeholder="Buscar por nombre, correo o rol"/></label></div><p className="users-actions-guide"><span className="guide-on"/> Verde: activo <span className="guide-off"/> Rojo: inactivo · Pulsa el interruptor para cambiarlo</p><div className="users-table-wrap"><table className="users-table"><thead><tr><th>Usuario</th><th>Rol</th><th>Cuenta</th><th>Correo</th><th>Doble factor</th><th>Acciones</th></tr></thead><tbody>{list.map(u=><tr key={u.id}><td><div className="user-identity"><span className="user-avatar">{u.name.trim().charAt(0).toUpperCase()}</span><div><strong>{[u.name,u.last_name].filter(Boolean).join(' ')}</strong><small>{u.email}</small></div></div></td><td>{roleName[u.role]||u.role}</td><td><span className={'user-pill '+(u.active?'on':'off')}>{u.active?'Activo':'Inactivo'}</span></td><td><span className={'user-pill '+(u.email_verified?'on':'pending')}>{u.email_verified?'Verificado':u.setup_pending?'Invitación pendiente':'Pendiente'}</span></td><td><span className={'user-pill '+(u.two_factor?'on':'off')}>{u.two_factor?'Activado':'Desactivado'}</span></td><td><div className="user-actions"><SvgButton icon="eye" label={`Ver detalles de ${u.name}`} onClick={()=>ask('details',u)}/><SvgButton icon="history" label={`Ver actividad de ${u.name}`} onClick={()=>openHistory(u)}/>{u.setup_pending&&<SvgButton icon="mail" label={`Reenviar invitación a ${u.name}`} onClick={()=>run(async()=>{const r=await api(`/users/${u.id}/invitation`,{method:'POST'});if(!r.invitation_sent)throw Error('No se pudo enviar la invitación. Revisa la configuración de correo.');M('Invitación enviada correctamente.')},'Enviando invitación…')}/>}<StateButton label="Cuenta" active={u.active} user={u.name} onClick={()=>ask('active',u)}/><StateButton label="2FA" active={u.two_factor} user={u.name} onClick={()=>ask('two',u)}/></div></td></tr>)}</tbody></table>{list.length===0&&<p className="users-empty">No hay usuarios que coincidan con la búsqueda.</p>}</div>
+ {modal==='create'&&<Modal message={message} title="Nuevo usuario" onClose={close}><form onSubmit={e=>{e.preventDefault();let form=e.currentTarget,f=new FormData(form);run(async()=>{let result=await api('/users',{method:'POST',body:{name:f.get('name'),last_name:f.get('last_name'),email:f.get('email')}});close();await refresh();M(result.invitation_sent?'Usuario creado. Enviamos un enlace para crear su contraseña.':'Usuario creado, pero no se pudo enviar la invitación. Usa el botón de correo para reenviarla.')},'Creando usuario y enviando invitación…')}}><div className="grid"><label>Nombres<input name="name" required maxLength="120"/></label><label>Apellidos<input name="last_name" required maxLength="120"/></label><label>Correo<input name="email" type="email" required maxLength="254"/></label></div><p className="user-note">La persona recibirá un enlace para crear su contraseña. Inicialmente tendrá acceso a Viajes; podrás cambiar su rol y permisos desde sus detalles.</p><div className="modal-actions"><button type="button" className="secondary" onClick={close}>Cancelar</button><button>Crear y enviar invitación</button></div></form></Modal>}
+ {modal==='details'&&selected&&<Modal message={message} title="Detalles del usuario" onClose={close}><div className="user-detail-head"><UserAvatar user={selected} size="large" endpoint={`/users/${selected.id}/photo`}/><div><h3>{[selected.name,selected.last_name].filter(Boolean).join(' ')}</h3><p>{selected.email}</p></div></div><dl className="user-details"><div><dt>Rol</dt><dd>{roleName[selected.role]||selected.role}</dd></div><div><dt>Cuenta</dt><dd>{selected.active?'Activa':'Inactiva'}</dd></div><div><dt>Correo</dt><dd>{selected.email_verified?'Verificado':'Pendiente de verificación'}</dd></div><div><dt>Doble factor</dt><dd>{selected.two_factor?'Activado':'Desactivado'}</dd></div><div><dt>Cédula</dt><dd>{selected.document_number||'Sin completar'}</dd></div><div><dt>Fecha de nacimiento</dt><dd>{selected.birth_date||'Sin completar'}</dd></div><div><dt>Sexo</dt><dd>{selected.sex?selected.sex.replaceAll('_',' '):'Sin completar'}</dd></div><div><dt>Celular</dt><dd>{selected.phone||'Sin completar'}</dd></div><div><dt>Creación</dt><dd>{date(selected.created_at)}</dd></div><div><dt>Permisos</dt><dd>{selected.role==='admin'?'Acceso de administrador':selected.permissions?.length?selected.permissions.join(', '):'Sin permisos'}</dd></div></dl><Permissions user={selected} onSave={update} currentUser={currentUser}/></Modal>}
+ {modal==='history'&&selected&&<Modal message={message} title={`Actividad de ${selected.name}`} onClose={close} wide><p className="user-note">Historial de operaciones registradas. Los intentos fallidos y las pantallas visitadas no se registran en esta versión.</p>{historyLoading&&!records.length?<p>Cargando actividad…</p>:records.length?<div className="user-history">{records.map(x=><div className="history-row" key={x.id}><span className="history-dot"/><div><strong>{actionName[x.action]||x.action}</strong><small>{date(x.created_at)}</small><small className="history-details">{Object.entries(x.details||{}).map(([key,value])=>`${key}: ${typeof value==='object'?JSON.stringify(value):value}`).join(' · ')}</small></div></div>)}</div>:<p className="users-empty">Este usuario aún no tiene actividad registrada.</p>}{cursor&&<button type="button" className="secondary" disabled={historyLoading} onClick={more}>{historyLoading?'Cargando…':'Cargar más'}</button>}</Modal>}
+ {(modal==='active'||modal==='two')&&selected&&<Modal message={message} title={modal==='active'?(selected.active?'Desactivar usuario':'Activar usuario'):(selected.two_factor?'Desactivar doble factor':'Activar doble factor')} onClose={close}><p>¿Deseas {modal==='active'?(selected.active?'desactivar':'activar')+' la cuenta de':(selected.two_factor?'desactivar':'activar')+' el doble factor de'} <strong>{selected.name}</strong>?</p><p className="user-note">{modal==='active'?(selected.active?'No podrá ingresar y sus sesiones se cerrarán. Los datos se conservarán.':'Podrá volver a ingresar con sus credenciales.'):(selected.two_factor?'Se dejará de solicitar el código adicional al ingresar.':'Se solicitará un código enviado a su correo verificado al ingresar.')}</p>{String(selected.id)===String(currentUser?.id)&&<p className="user-note">Al modificar tu propia cuenta se cerrará tu sesión actual.</p>}<div className="modal-actions"><button className="secondary" onClick={close}>Cancelar</button><button onClick={()=>update(modal==='active'?{active:!selected.active}:{two_factor:!selected.two_factor})}>Confirmar</button></div></Modal>}
+ </div>;
 }
+function Permissions({user,onSave,currentUser}){const[perms,P]=useState(user.permissions||[]),[role,R]=useState(user.role);return <div className="user-permission-box"><strong>Rol y permisos</strong><label>Rol<select value={role} onChange={e=>R(e.target.value)} disabled={String(user.id)===String(currentUser?.id)}><option value="conductor">Conductor</option><option value="usuario">Usuario</option><option value="admin">Administrador</option></select></label>{role!=='admin'&&<div><label><input type="checkbox" checked={perms.includes('viajes')} onChange={e=>P(e.target.checked?[...perms,'viajes']:perms.filter(x=>x!=='viajes'))}/> Viajes</label><label><input type="checkbox" checked={perms.includes('reportes')} onChange={e=>P(e.target.checked?[...perms,'reportes']:perms.filter(x=>x!=='reportes'))}/> Reportes</label></div>}<button type="button" onClick={()=>onSave({permissions:perms,...(role!==user.role?{role}: {})})}>Guardar rol y permisos</button></div>}

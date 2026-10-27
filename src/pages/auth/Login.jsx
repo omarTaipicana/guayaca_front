@@ -1,4 +1,10 @@
+import {useState} from 'react';
+import ForgotPassword from './ForgotPassword.jsx';
+import '../styles/Login.css';
+import Mascot from '../../components/common/Mascot.jsx';
 export default function Login({ step, login, loading, message, Step }) {
+  const [recover, setRecover] = useState(false);
+  if (recover) return <ForgotPassword onBack={() => setRecover(false)}/>;
   return (
     <main className="login">
       <div className="loginbox">
@@ -45,7 +51,9 @@ export default function Login({ step, login, loading, message, Step }) {
             </button>
           )}
         </form>
+        {!step && <button type="button" className="recovery-login-link" onClick={() => setRecover(true)}>¿Olvidaste tu contraseña?</button>}
         {message && <div className="notice">{message}</div>}
+        <Mascot/>
       </div>
     </main>
   );

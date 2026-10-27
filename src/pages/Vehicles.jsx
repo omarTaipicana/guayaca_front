@@ -1,39 +1,6 @@
-import { api } from "../services/api.js";
-import { money, date } from "../services/format.js";
-import UserCard from "../components/common/UserCard.jsx";
-export default function Vehicles({
-  admin,
-  data,
-  users,
-  vehicles,
-  run,
-  refresh,
-  submit,
-  detail,
-  audit,
-}) {
-  return (
-    <>
-      <h1>Vehículos</h1>
-      <form className="grid" onSubmit={submit("/vehicles", refresh)}>
-        <label>
-          Placa
-          <input name="plate" required />
-        </label>
-        <label>
-          Descripción
-          <input name="description" />
-        </label>
-        <button>Agregar vehículo</button>
-      </form>
-      <div className="cards">
-        {vehicles.map((v) => (
-          <article key={v.id}>
-            <strong>{v.plate}</strong>
-            <p>{v.description}</p>
-          </article>
-        ))}
-      </div>
-    </>
-  );
-}
+import {useCallback,useEffect,useState} from 'react';
+import {api,fetchBlob} from '../services/api.js';import Modal from '../components/common/Modal.jsx';import ActionIcon from '../components/common/ActionIcon.jsx';import './styles/Vehicles.css';
+function Photo({vehicle}){const [url,U]=useState('');useEffect(()=>{if(!vehicle.has_photo){U('');return}let objectUrl='',alive=true;const controller=new AbortController();fetchBlob(`/vehicles/${vehicle.id}/photo`,{signal:controller.signal}).then(blob=>{if(alive){objectUrl=URL.createObjectURL(blob);U(objectUrl)}}).catch(()=>{});return()=>{alive=false;controller.abort();if(objectUrl)URL.revokeObjectURL(objectUrl)}},[vehicle.id,vehicle.has_photo,vehicle.photo_bytes]);return url?<img src={url} alt={`Vehículo ${vehicle.plate}`}/>:<div className="vehicle-photo-placeholder"><ActionIcon name="truck"/><span>Sin fotografía</span></div>}
+const empty={plate:'',brand:'',model:'',model_year:'',chassis_number:'',engine_number:'',capacity_tons:'',color:'',description:''};
+export default function Vehicles({vehicles,run,refresh,M,message}){let[edit,E]=useState(null),[search,S]=useState('');const close=useCallback(()=>E(null),[]);let list=vehicles.filter(v=>[v.plate,v.brand,v.model,v.chassis_number].join(' ').toLocaleLowerCase().includes(search.toLocaleLowerCase().trim()));return <div className="vehicle-page"><div className="vehicle-header"><div><span className="vehicle-kicker">FLOTA GUAYACA</span><h1>Vehículos</h1><p>Información de la flota en un solo lugar.</p></div><button type="button" className="vehicle-add" onClick={()=>E({...empty})}><ActionIcon name="plus"/> Agregar vehículo</button></div><div className="vehicle-toolbar"><strong>{vehicles.length} {vehicles.length===1?'vehículo':'vehículos'}</strong><label><span className="sr-only">Buscar vehículo</span><input value={search} onChange={e=>S(e.target.value)} placeholder="Buscar por placa, marca o chasis"/></label></div><div className="vehicle-cards">{list.map(v=><article className="vehicle-card" key={v.id}><div className="vehicle-photo"><Photo vehicle={v}/><span className="vehicle-status">{v.active?'Activo':'Inactivo'}</span></div><div className="vehicle-card-body"><div className="vehicle-card-title"><div><span className="vehicle-overline">PLACA</span><h3>{v.plate}</h3></div><button type="button" className="icon-action" title={`Editar ${v.plate}`} aria-label={`Editar ${v.plate}`} onClick={()=>E(v)}><ActionIcon name="edit"/></button></div><p className="vehicle-model">{[v.brand,v.model,v.model_year].filter(Boolean).join(' · ')||'Marca y modelo sin registrar'}</p><dl className="vehicle-facts"><div><dt>Chasis</dt><dd>{v.chassis_number||'—'}</dd></div><div><dt>Motor</dt><dd>{v.engine_number||'—'}</dd></div><div><dt>Capacidad</dt><dd>{v.capacity_tons!=null?`${v.capacity_tons} t`:'—'}</dd></div><div><dt>Color</dt><dd>{v.color||'—'}</dd></div></dl>{v.description&&<p className="vehicle-description">{v.description}</p>}</div></article>)}</div>{!list.length&&<p className="vehicle-empty">No hay vehículos que mostrar.</p>}
+{edit&&<Modal message={message} title={edit.id?'Editar vehículo':'Agregar vehículo'} onClose={close} wide><form onSubmit={e=>{e.preventDefault();let form=e.currentTarget;let body=new FormData(form);if(!body.get('photo')?.size)body.delete('photo');run(async()=>{await api(edit.id?`/vehicles/${edit.id}`:'/vehicles',{method:edit.id?'PATCH':'POST',body});close();await refresh();M(edit.id?'Vehículo actualizado.':'Vehículo registrado.')},'Guardando vehículo…')}}><div className="grid"><label>Placa *<input name="plate" defaultValue={edit.plate} maxLength="30" required/></label><label>Marca<input name="brand" defaultValue={edit.brand||''} maxLength="120"/></label><label>Modelo<input name="model" defaultValue={edit.model||''} maxLength="120"/></label><label>Año<input name="model_year" type="number" min="1900" max="2100" step="1" defaultValue={edit.model_year||''}/></label><label>Número de chasis<input name="chassis_number" defaultValue={edit.chassis_number||''} maxLength="120"/></label><label>Número de motor<input name="engine_number" defaultValue={edit.engine_number||''} maxLength="120"/></label><label>Capacidad en toneladas<input name="capacity_tons" type="number" min="0" step="0.01" defaultValue={edit.capacity_tons??''}/></label><label>Color<input name="color" defaultValue={edit.color||''} maxLength="80"/></label><label>Descripción<input name="description" defaultValue={edit.description||''} maxLength="500"/></label><label>Fotografía JPEG, PNG o WebP<input name="photo" type="file" accept="image/jpeg,image/png,image/webp"/></label></div><p className="vehicle-note">La placa es obligatoria. La fotografía es opcional y se comprime para ahorrar espacio; máximo 12 MB.</p><div className="modal-actions"><button type="button" className="secondary" onClick={close}>Cancelar</button><button>{edit.id?'Guardar cambios':'Registrar vehículo'}</button></div></form></Modal>}</div>}

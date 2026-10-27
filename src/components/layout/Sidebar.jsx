@@ -1,33 +1,14 @@
-export default function Sidebar({admin,user,section,S,T}) { return (
-      <nav>
-        {[
-          ...(admin || user.permissions.includes("viajes")
-            ? [["viajes", "Viajes"]]
-            : []),
-          ...(admin || user.permissions.includes("reportes")
-            ? [["reportes", "Resultados"]]
-            : []),
-          ...(admin
-            ? [
-                ["usuarios", "Usuarios"],
-                ["vehiculos", "Vehículos"],
-                ["actividad", "Actividad"],
-                ["almacenamiento", "Almacenamiento"],
-                ["avance", "Avance del proyecto"],
-              ]
-            : []),
-        ].map(([id, label]) => (
-          <button
-            key={id}
-            className={section === id ? "active" : ""}
-            onClick={() => {
-              S(id);
-              T(null);
-            }}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
-
-); }
+import { useEffect, useRef } from 'react';
+import Icon from './Icons.jsx';
+import Mascot from '../common/Mascot.jsx';
+export default function Sidebar({admin,user,section,S,T,collapsed,onToggleCollapsed,mobile,open,onClose}) {
+ const panel=useRef(null);
+ useEffect(()=>{if(!mobile||!open)return;const first=panel.current?.querySelector('[aria-current="page"]')||panel.current?.querySelector('button');first?.focus();const handle=e=>{if(e.key==='Escape'){e.preventDefault();onClose(true)}if(e.key==='Tab'){const list=[...panel.current.querySelectorAll('button:not([disabled])')];if(!list.length)return;const first=list[0],last=list[list.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}}};document.addEventListener('keydown',handle);return()=>document.removeEventListener('keydown',handle)},[mobile,open,onClose]);
+ const items=[...(admin||user.permissions.includes('viajes')?[['viajes','Viajes']]:[]),...(admin||user.permissions.includes('reportes')?[['reportes','Resultados']]:[]),...(admin?[['control','Control de viajes'],['usuarios','Usuarios'],['vehiculos','Vehículos'],['actividad','Actividad'],['almacenamiento','Almacenamiento'],['avance','Avance del proyecto']]:[])];
+ return <><div className={'sidebar-backdrop'+(mobile&&open?' is-visible':'')} onClick={()=>onClose(true)} aria-hidden="true"/><aside ref={panel} id="app-navigation" className={'sidebar'+(collapsed&&!mobile?' is-collapsed':'')+(mobile&&open?' is-open':'')} aria-label="Menú principal" aria-hidden={mobile&&!open?true:undefined} inert={mobile&&!open?true:undefined}>
+   <div className="sidebar-top"><div className="sidebar-heading"><span className="sidebar-caption">PANEL DE CONTROL</span><span className="sidebar-subtitle">Navegación</span></div><button type="button" className="sidebar-collapse" onClick={mobile?()=>onClose(true):onToggleCollapsed} aria-label={mobile?'Cerrar menú':collapsed?'Expandir menú':'Contraer menú'} title={mobile?'Cerrar menú':collapsed?'Expandir menú':'Contraer menú'} aria-expanded={mobile?open:!collapsed}><Icon name={mobile?'cerrar':collapsed?'derecha':'izquierda'} size={19}/></button></div>
+   <nav className="sidebar-nav" aria-label="Secciones">{items.map(([id,label])=><button type="button" key={id} className={'sidebar-item'+(section===id?' active':'')} onClick={()=>{S(id);T(null);if(mobile)onClose(true)}} aria-label={label} aria-current={section===id?'page':undefined} title={collapsed&&!mobile?label:undefined}><span className="sidebar-icon"><Icon name={id}/></span><span className="sidebar-label">{label}</span><span className="sidebar-active-mark" aria-hidden="true"/></button>)}</nav>
+   <Mascot compact/>
+   <div className="sidebar-footer"><span className="sidebar-footer-dot"/><span className="sidebar-footer-text">GUAYACA Transport</span></div>
+ </aside></>;
+}

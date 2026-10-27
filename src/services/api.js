@@ -30,3 +30,9 @@ export async function download(id, name) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(u), 1000);
 }
+
+export async function fetchBlob(path, options = {}) {
+  const response = await fetch(API + path, { ...options, headers: { ...(options.headers || {}), ...(bearer ? { Authorization: "Bearer " + bearer } : {}) } });
+  if (!response.ok) throw Error("No se pudo cargar el archivo");
+  return response.blob();
+}

@@ -1,0 +1,6 @@
+.login{min-height:100vh;display:grid;place-items:center;background:#07346b;padding:20px}
+.loginbox{width:min(440px,100%);background:white;border-radius:16px;padding:32px;box-shadow:0 12px 32px #0003}
+.loginbox img{width:90px;display:block;margin:auto}
+.loginbox h1,.loginbox>p{text-align:center}
+
+.recovery-login-link{display:block;width:100%;background:transparent;color:#15558a;font-size:.85rem;padding:12px 4px}.recovery-login-link:hover{text-decoration:underline}
