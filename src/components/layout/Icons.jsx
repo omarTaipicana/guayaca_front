@@ -1,4 +1,9 @@
 const paths = {
+ notificaciones:<><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></>,
+ mantenimientos:<><path d="m14 6 4-4a6 6 0 0 1-7 8L4 17a2 2 0 0 0 3 3l7-7a6 6 0 0 0 8-7l-4 4z"/></>,
+ clientes: <><path d="M4 21V5h10v16M14 10h6v11M8 9h2M8 13h2M8 17h2M17 14h1M17 18h1M2 21h20"/></>,
+ lugares: <><path d="M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="3"/></>,
+  zonas: <><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3zM9 3v15M15 6v15"/><path d="M10 10h4M12 8v6"/></>,
   control: <><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3zM9 3v15M15 6v15"/><circle cx="12" cy="10" r="2"/></>,
   viajes: <><path d="M3 6h12v10H3z"/><path d="M15 9h3l3 3v4h-6M6 16a2 2 0 1 0 4 0M16 16a2 2 0 1 0 4 0"/></>,
   reportes: <><path d="M4 20V5M4 20h16"/><path d="M8 16v-4M12 16V8M16 16v-6M20 16V5"/></>,

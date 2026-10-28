@@ -1,3 +1,9 @@
+import GpsBanner from './components/catalog/GpsBanner.jsx';
+import {stopGps} from './services/gps.js';
+import Notifications from './pages/Notifications.jsx';
+import Maintenances from './pages/Maintenances.jsx';
+import Catalog from './pages/Catalog.jsx';
+import Zones from './pages/Zones.jsx';
 import LoadingOverlay from './components/common/LoadingOverlay.jsx';
 import './components/layout/styles/AppLayout.css';
 import Header from './components/layout/Header.jsx';
@@ -47,6 +53,8 @@ export default function App() {
   const toggleCollapsed = () => setCollapsed(value => { const next = !value; try { localStorage.setItem('guayaca_sidebar_collapsed', String(next)); } catch {} return next; });
   const [loadingText, setLoadingText] = useState('Cargando información…');
   const admin = user?.role === "admin";
+  const [notificationCount,SetNotificationCount]=useState(0);
+
   const run = async (fn, label) => {
     try {
       M("");
@@ -130,6 +138,7 @@ export default function App() {
     }, step ? 'Verificando el código…' : 'Iniciando sesión…');
   }
   function clearSession(message = '') {
+    stopGps();
     setBearer('');
     sessionStorage.removeItem('token');
     setUser(null); T(null); D([]); U([]); V([]); ST(null); A([]); SetControl(null); Step(null); setMenuOpen(false); S('viajes'); M(message);
@@ -149,6 +158,7 @@ export default function App() {
     e.preventDefault();
     let form = e.currentTarget,
       body = Object.fromEntries(new FormData(form));
+    if(url === "/trips")body.destination_ids=new FormData(form).getAll("destination_ids");
     run(async () => {
       await api(url, { method: "POST", body });
       form.reset();
@@ -166,15 +176,21 @@ export default function App() {
     );
   return (
     <div className={'layout'+(collapsed ? ' sidebar-collapsed' : '')}>
-      <Header user={user} exit={exit} menuOpen={menuOpen} onToggleMenu={() => setMenuOpen(value => !value)} menuButtonRef={menuButtonRef} onOpenProfile={() => {S("perfil");T(null);setMenuOpen(false)}}/>
-      <Sidebar admin={admin} user={user} section={section} S={S} T={T} collapsed={collapsed} onToggleCollapsed={toggleCollapsed} mobile={mobile} open={menuOpen} onClose={closeMenu}/>
+      <Header onNotificationCount={SetNotificationCount} onOpenInbox={()=>{S("notificaciones");T(null);setMenuOpen(false)}} onOpenTrip={id=>run(async()=>{await detail(id);S("viajes")})} user={user} exit={exit} menuOpen={menuOpen} onToggleMenu={() => setMenuOpen(value => !value)} menuButtonRef={menuButtonRef} onOpenProfile={() => {S("perfil");T(null);setMenuOpen(false)}}/>
+      <Sidebar notificationCount={notificationCount} admin={admin} user={user} section={section} S={S} T={T} collapsed={collapsed} onToggleCollapsed={toggleCollapsed} mobile={mobile} open={menuOpen} onClose={closeMenu}/>
       {loading && <LoadingOverlay message={loadingText}/>}
+      <GpsBanner/>
       <main className="content">
         {message && (
           <div className="notice" role="status">
             {message}
           </div>
         )}
+        {section === "notificaciones" && <Notifications admin={admin} onOpenTrip={id=>run(async()=>{await detail(id);S("viajes")})}/>}
+        {section === "mantenimientos" && admin && <Maintenances/>}
+        {section === "clientes" && admin && <Catalog key="clients"/>}
+        {section === "lugares" && admin && <Catalog key="places" places/>}
+        {section === "zonas" && admin && <Zones/>}
         {section === "perfil" && <Profile user={user} run={run} onUpdated={updated => { setUser({...updated, photo_revision: Date.now()}); M('Perfil actualizado correctamente.'); }}/>} 
         {section === "sin_acceso" && (
           <p>
@@ -207,10 +223,11 @@ export default function App() {
             }}
             run={run}
             admin={admin}
+            currentUser={user}
           />
         )}
         {section === "reportes" && (
-          <Reports
+          <Reports canOpenTrip={admin||user.permissions.includes("viajes")} onOpenTrip={async id=>{await detail(id);S("viajes")}}
             {...{
               admin,
               data,

@@ -1,0 +1,2 @@
+import {useEffect,useState} from 'react';import {gpsStatus,stopGps} from '../../services/gps.js';import './styles/Gps.css';
+export default function GpsBanner(){const [state,S]=useState(gpsStatus());useEffect(()=>{const update=e=>S(e.detail);window.addEventListener('guayaca:gps',update);return()=>window.removeEventListener('guayaca:gps',update)},[]);return state.active?<div className="gps-global-banner" role="status"><span>GPS activo · viaje #{state.trip_id}</span><button type="button" onClick={stopGps}>Detener GPS</button></div>:null}
