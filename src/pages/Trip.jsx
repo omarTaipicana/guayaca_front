@@ -1,3 +1,4 @@
+import SimulationControls from '../components/catalog/SimulationControls.jsx';
 import GpsTrip from '../components/catalog/GpsTrip.jsx';
 import PlannedRouteMap from '../components/catalog/PlannedRouteMap.jsx';
 import { useState } from "react";
@@ -45,8 +46,8 @@ export default function Trip({ detail, refresh, back, run, admin,currentUser }) 
       <button className="secondary" onClick={back}>
         ← Volver a viajes
       </button>
-      <h1>{t.code}</h1>{t.metadata?.capacity_warning&&<p className="catalog-info">{t.metadata.capacity_warning}</p>}{Number(t.standby_amount)>0&&<p className="catalog-info">Tarifa base: ${money(t.base_amount)} · Stand by: ${money(t.standby_amount)} · Total: ${money(t.amount)}</p>}
-      {t.metadata?.route&&<><h2>Ruta calculada al crear el viaje</h2><PlannedRouteMap route={t.metadata.route} points={[t.metadata.origin_place,...t.metadata.destination_places]}/><GpsTrip trip={t} user={currentUser} onUpdated={refresh}/><p>Tarifa aplicada: {t.metadata.farthest?.name} · ${money(t.amount)} · {t.tonnage} t</p><ul>{t.metadata.destination_places.map((p,i)=><li key={p.id}>{p.name}</li>)}</ul></>}
+      <h1>{t.code} · {t.is_test?'PRUEBA':'REAL'}</h1>{t.is_test&&<p className="catalog-info">Viaje de prueba: no se incluirá en resultados ni cortes de cobro y no modifica el kilometraje real.</p>}{t.is_test&&admin&&<SimulationControls trip={t} onUpdated={refresh}/>}{t.metadata?.capacity_warning&&<p className="catalog-info">{t.metadata.capacity_warning}</p>}{Number(t.standby_amount)>0&&<p className="catalog-info">Tarifa base: ${money(t.base_amount)} · Stand by: ${money(t.standby_amount)} · Total: ${money(t.amount)}</p>}
+      {t.metadata?.route&&<><h2>Ruta calculada al crear el viaje</h2><PlannedRouteMap route={t.metadata.route} points={[t.metadata.origin_place,...t.metadata.destination_places]}/><GpsTrip trip={t} user={currentUser} onUpdated={refresh}/><p>Tarifa aplicada: {t.metadata.priced_destination?.name||t.metadata.farthest?.name} · ${money(t.amount)} · {t.tonnage} t</p><ul>{t.metadata.destination_places.map((p,i)=><li key={p.id}>{p.name}</li>)}</ul></>}
       {t.metadata&&<details><summary>Datos conservados al crear el viaje</summary>{t.metadata.client&&<p>Cliente histórico: {t.metadata.client?.name||t.metadata.client}</p>}{t.metadata.client?.document_number&&<p>Cédula/RUC: {t.metadata.client.document_number}</p>}<p>Origen: {t.metadata.origin_place?.name||t.metadata.origin||'—'}</p><p>Destinos: {t.metadata.destination_places?.map(p=>p.name).join(' → ')||t.metadata.destination||'—'}</p><p>Categoría: {t.metadata.category?.name||'Sin categoría registrada'} · Valor guardado: ${money(t.metadata.amount??t.amount)}</p>{t.metadata.rates?.map((r,i)=><p key={i}>Tarifa registrada: ${money(r.amount)} · {r.active?'Activa':'Inactiva'}</p>)}<small>{t.metadata.legacy?'Viaje anterior: se conservaron los textos existentes.':'Estos datos no cambian al editar o eliminar lugares o tarifas.'}</small></details>}
       <p>
         {t.origin || "Origen"} → {t.destination || "Destino"} ·{" "}
@@ -126,7 +127,7 @@ export default function Trip({ detail, refresh, back, run, admin,currentUser }) 
                 ))}
               </select>
             </label>
-            {t.metadata?.calculation==='farthest_road_destination'&&['llegada_destino','entrega'].includes(eventType)&&<label>Destino<select name="destination_index" required defaultValue=""><option value="">Selecciona</option>{t.metadata.destination_places.map((p,i)=><option key={p.id} value={i} disabled={eventType==='entrega'&&deliveries.some(d=>d.position===i)}>{p.name}</option>)}</select></label>}
+            {['farthest_road_destination','highest_destination_rate'].includes(t.metadata?.calculation)&&['llegada_destino','entrega'].includes(eventType)&&<label>Destino<select name="destination_index" required defaultValue=""><option value="">Selecciona</option>{t.metadata.destination_places.map((p,i)=><option key={p.id} value={i} disabled={eventType==='entrega'&&deliveries.some(d=>d.position===i)}>{p.name}</option>)}</select></label>}
             <label>
               Kilometraje del tablero
               <input
