@@ -1,3 +1,4 @@
+import Collections from './pages/Collections.jsx';
 import GpsBanner from './components/catalog/GpsBanner.jsx';
 import {stopGps} from './services/gps.js';
 import Notifications from './pages/Notifications.jsx';
@@ -189,6 +190,7 @@ export default function App() {
         {section === "notificaciones" && <Notifications admin={admin} onOpenTrip={id=>run(async()=>{await detail(id);S("viajes")})}/>}
         {section === "mantenimientos" && admin && <Maintenances/>}
         
+        {section === "cobros" && admin && <Collections/>}
         {section === "lugares" && admin && <Catalog key="places" places/>}
         {section === "zonas" && admin && <Zones/>}
         {section === "perfil" && <Profile user={user} run={run} onUpdated={updated => { setUser({...updated, photo_revision: Date.now()}); M('Perfil actualizado correctamente.'); }}/>} 
