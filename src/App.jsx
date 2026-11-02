@@ -188,7 +188,7 @@ export default function App() {
         )}
         {section === "notificaciones" && <Notifications admin={admin} onOpenTrip={id=>run(async()=>{await detail(id);S("viajes")})}/>}
         {section === "mantenimientos" && admin && <Maintenances/>}
-        {section === "clientes" && admin && <Catalog key="clients"/>}
+        
         {section === "lugares" && admin && <Catalog key="places" places/>}
         {section === "zonas" && admin && <Zones/>}
         {section === "perfil" && <Profile user={user} run={run} onUpdated={updated => { setUser({...updated, photo_revision: Date.now()}); M('Perfil actualizado correctamente.'); }}/>} 
