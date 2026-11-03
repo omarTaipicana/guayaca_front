@@ -2,3 +2,8 @@
 .gps-global-banner{position:fixed;right:16px;bottom:12px;z-index:1000;background:#07346b;color:#fff;box-shadow:0 4px 20px #0003;padding:9px 12px;border-radius:10px;display:flex;align-items:center;gap:12px;font-size:12px}.gps-global-banner button{background:#fff;color:#07346b;padding:6px 10px;font-size:12px}
 
 @media(max-width:480px){.header-user .header-user-name{display:none}.header-user{gap:6px}.notification-bell{padding:8px}}
+
+.gps-exit-form{background:#fff7ed;border:1px solid #ffd4a4;border-radius:12px;padding:16px;display:grid;gap:12px}.gps-exit-form h4{margin:0}.gps-permission-note{padding:16px;background:#eef4fa;border-radius:10px}.gps-required-banner{position:fixed;bottom:12px;left:12px;right:12px;z-index:1001;background:#fff3cd;color:#573e0c;border:1px solid #e9c768;border-radius:12px;padding:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}.gps-required-banner button{margin-left:auto}
+
+.gps-global-banner{max-width:calc(100vw - 32px);overflow-wrap:anywhere}
+@media(max-width:650px){.gps-global-banner{left:12px;right:12px;max-width:none;font-size:11px}}

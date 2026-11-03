@@ -1,0 +1,6 @@
+import {Capacitor} from '@capacitor/core';import {Geolocation} from '@capacitor/geolocation';
+export const nativeLocation=Capacitor.isNativePlatform();
+export async function locationPermission(){if(nativeLocation){const p=await Geolocation.checkPermissions();return p.location==='granted'?'granted':p.location==='denied'?'denied':'prompt'}if(navigator.permissions)return (await navigator.permissions.query({name:'geolocation'})).state;return 'prompt';}
+export async function getPosition(options){if(nativeLocation){const p=await Geolocation.checkPermissions();if(p.location!=='granted'){const r=await Geolocation.requestPermissions();if(r.location!=='granted'){const e=Error('Permiso de ubicación precisa denegado');e.code=1;throw e;}}return Geolocation.getCurrentPosition(options)}return new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(resolve,reject,options));}
+export async function watchPosition(ok,error,options){if(nativeLocation){await getPosition(options);return Geolocation.watchPosition(options,(p,e)=>{if(e)error(e);else if(p)ok(p)})}return navigator.geolocation.watchPosition(ok,error,options);}
+export function clearPositionWatch(id){if(nativeLocation)return Geolocation.clearWatch({id}).catch(()=>{});navigator.geolocation?.clearWatch(id);}

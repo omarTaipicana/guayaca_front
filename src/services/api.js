@@ -1,38 +1,12 @@
-const API = import.meta.env.VITE_API_URL || "/api";
-let bearer = sessionStorage.getItem("token") || "";
-export const getBearer = () => bearer;
-export const setBearer = (value) => {
-  bearer = value;
-};
-export async function api(path, options = {}) {
-  let headers = { ...(options.headers || {}) };
-  if (bearer) headers.Authorization = "Bearer " + bearer;
-  if (options.body && !(options.body instanceof FormData)) {
-    headers["Content-Type"] = "application/json";
-    options.body = JSON.stringify(options.body);
-  }
-  let r = await fetch(API + path, { ...options, headers });
-  if (!r.ok) {
-    let d = await r.json().catch(() => ({}));
-    throw Error(d.error || "Error de conexión");
-  }
-  return r.json();
-}
-export async function download(id, name) {
-  let r = await fetch(API + "/files/" + id, {
-    headers: { Authorization: "Bearer " + bearer },
-  });
-  if (!r.ok) throw Error("No se pudo descargar");
-  let u = URL.createObjectURL(await r.blob()),
-    a = document.createElement("a");
-  a.href = u;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(u), 1000);
-}
-
-export async function fetchBlob(path, options = {}) {
-  const response = await fetch(API + path, { ...options, headers: { ...(options.headers || {}), ...(bearer ? { Authorization: "Bearer " + bearer } : {}) } });
-  if (!response.ok) throw Error("No se pudo cargar el archivo");
-  return response.blob();
+import {rawApi,getBearer,setBearer as setHttpBearer,download,fetchBlob} from './http.js';
+import {queueable,queueRequest,cached,cacheResponse,ownerId} from './offline/queue.js';
+import {saveNativeSession} from './native/session.js';
+export {getBearer,download,fetchBlob};
+export function setBearer(token){setHttpBearer(token);return saveNativeSession(token);}
+const cacheable=path=>/^\/(me|trips|gps-session)$/.test(path)||/^\/trips\/\d+(\/(gps-state|control))?$/.test(path);
+export async function api(path,options={}){
+ const owner=ownerId();
+ if(queueable(path,options))return queueRequest(path,options);
+ try{const result=await rawApi(path,options);if(owner&&owner!==ownerId()){const error=Error('La cuenta cambió durante la solicitud');error.status=409;throw error;}if((!options.method||options.method==='GET')&&cacheable(path)){try{await cacheResponse(path,result)}catch(e){window.dispatchEvent(new CustomEvent('guayaca:offline-error',{detail:'No se pudo guardar la copia local: '+e.message}))}}return result;}
+ catch(e){if(owner&&owner!==ownerId())throw Error('La cuenta cambió durante la solicitud');if(!e.status&&(!options.method||options.method==='GET')&&cacheable(path)){const copy=await cached(path);if(copy){window.dispatchEvent(new CustomEvent('guayaca:offline-cache',{detail:{path,saved_at:copy.saved_at}}));return copy.data;}}throw e;}
 }

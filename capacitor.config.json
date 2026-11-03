@@ -1,0 +1,8 @@
+{
+  "appId":"com.guayacatransport.app",
+  "appName":"GUAYACA Transport",
+  "webDir":"dist",
+  "server":{"androidScheme":"https"},
+  "android":{"allowMixedContent":false},
+  "plugins":{"CapacitorSQLite":{"androidIsEncryption":false},"LocalNotifications":{"smallIcon":"ic_guayaca_notification","iconColor":"#07346b"}}
+}

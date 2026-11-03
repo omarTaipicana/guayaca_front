@@ -1,3 +1,8 @@
+import {AutoPrepareTrips} from './components/catalog/TripPreparation.jsx';
+import {prepareTrip} from './services/offline/preparation.js';
+import OfflinePanel from './components/catalog/OfflinePanel.jsx';
+import GpsGuard from './components/catalog/GpsGuard.jsx';
+import {currentSection,allowedSection,writeSection} from './services/navigation.js';
 import Collections from './pages/Collections.jsx';
 import GpsBanner from './components/catalog/GpsBanner.jsx';
 import {stopGps} from './services/gps.js';
@@ -25,7 +30,7 @@ import Profile from "./pages/Profile.jsx";
 import ActivateAccount from "./pages/auth/ActivateAccount.jsx";
 export default function App() {
   const [user, setUser] = useState(null),
-    [section, S] = useState("viajes"),
+    [section, SetSection] = useState(currentSection),
     [message, M] = useState(""),
     [trip, T] = useState(null),
     [data, D] = useState([]),
@@ -37,6 +42,8 @@ export default function App() {
     [loading, Ld] = useState(false),
     [step, Step] = useState(null),
     [challenge, C] = useState("");
+  function S(value){const next=user?allowedSection(user,value):value;SetSection(next);writeSection(next);}
+  useEffect(()=>{const pop=()=>{if(!user)return;const next=allowedSection(user,currentSection());SetSection(next);T(null);writeSection(next,true)};window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop)},[user]);
   const [activationToken, setActivationToken] = useState(() => {
     const prefix = '#/activar-cuenta?';
     if (!window.location.hash.startsWith(prefix)) return '';
@@ -76,13 +83,7 @@ export default function App() {
           {
             let u = await api("/me");
             setUser(u);
-            S(
-              u.role === "admin" || u.permissions.includes("viajes")
-                ? "viajes"
-                : u.permissions.includes("reportes")
-                  ? "reportes"
-                  : "sin_acceso",
-            );
+            const target=allowedSection(u,currentSection());SetSection(target);writeSection(target,true);
           }
         } catch {
           sessionStorage.removeItem("token");
@@ -93,7 +94,8 @@ export default function App() {
   async function refresh() {
     if (!user) return;
     if (section === "viajes" || section === "reportes") {
-      D(await api("/trips"));
+      const rows=await api('/trips');D(rows);
+      if(navigator.onLine!==false)await Promise.allSettled(rows.filter(t=>String(t.driver_id)===String(user.id)&&['creado','en_curso'].includes(t.status)).map(t=>prepareTrip(t.id)));
       if (admin) {
         U(await api("/users"));
         V(await api("/vehicles"));
@@ -124,16 +126,10 @@ export default function App() {
         Step(r.step);
         C(r.challenge);
       } else {
-        setBearer(r.token);
+        await setBearer(r.token);
         sessionStorage.setItem("token", r.token);
         setUser(r.user);
-        S(
-          r.user.role === "admin" || r.user.permissions.includes("viajes")
-            ? "viajes"
-            : r.user.permissions.includes("reportes")
-              ? "reportes"
-              : "sin_acceso",
-        );
+        const target=allowedSection(r.user,currentSection());SetSection(target);writeSection(target,true);
         Step(null);
       }
     }, step ? 'Verificando el código…' : 'Iniciando sesión…');
@@ -153,7 +149,7 @@ export default function App() {
     finally { clearSession(warning); Ld(false); }
   }
   async function detail(id) {
-    T(await api("/trips/" + id));
+    T(await api("/trips/" + id));prepareTrip(id).catch(()=>{});
   }
   const submit = (url, after) => (e) => {
     e.preventDefault();
@@ -180,8 +176,8 @@ export default function App() {
       <Header onNotificationCount={SetNotificationCount} onOpenInbox={()=>{S("notificaciones");T(null);setMenuOpen(false)}} onOpenTrip={id=>run(async()=>{await detail(id);S("viajes")})} user={user} exit={exit} menuOpen={menuOpen} onToggleMenu={() => setMenuOpen(value => !value)} menuButtonRef={menuButtonRef} onOpenProfile={() => {S("perfil");T(null);setMenuOpen(false)}}/>
       <Sidebar notificationCount={notificationCount} admin={admin} user={user} section={section} S={S} T={T} collapsed={collapsed} onToggleCollapsed={toggleCollapsed} mobile={mobile} open={menuOpen} onClose={closeMenu}/>
       {loading && <LoadingOverlay message={loadingText}/>}
-      <GpsBanner/>
-      <main className="content">
+      <AutoPrepareTrips user={user}/><GpsBanner/><GpsGuard user={user}/>
+      <main className="content"><OfflinePanel user={user}/>
         {message && (
           <div className="notice" role="status">
             {message}

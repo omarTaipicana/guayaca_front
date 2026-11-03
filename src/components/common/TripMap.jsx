@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-export default function Map({ events }) {
+export default function Map({ events, gps=false }) {
   let ref = useRef();
   useEffect(() => {
     let pts = events
@@ -28,8 +28,7 @@ export default function Map({ events }) {
   return events.some((x) => x.latitude !== null) ? (
     <>
       <p className="hint">
-        La línea une los puntos registrados; no representa necesariamente la
-        ruta real.
+        {gps?'Recorrido registrado con coordenadas GPS. La línea une las muestras; los intervalos sin señal no reconstruyen el camino exacto.':'La línea une los eventos registrados; no representa necesariamente la ruta real.'}
       </p>
       <div className="map" ref={ref} />
     </>

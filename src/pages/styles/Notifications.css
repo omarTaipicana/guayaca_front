@@ -1,0 +1,1 @@
+.notification-folders{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}.notification-folders button[aria-pressed="true"]{box-shadow:0 0 0 3px #d8e7f8}.notification-read-hint{color:#526b83;font-size:14px}.catalog-table td input[type="checkbox"]:disabled{opacity:.4;cursor:not-allowed}

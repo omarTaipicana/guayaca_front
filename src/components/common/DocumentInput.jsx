@@ -1,0 +1,18 @@
+import {Capacitor} from '@capacitor/core';
+import {Camera,CameraResultType,CameraSource} from '@capacitor/camera';
+import {useRef,useState,useEffect} from 'react';
+import './styles/DocumentInput.css';
+function Preview({file}){const [url,U]=useState('');useEffect(()=>{if(!file.type.startsWith('image/'))return;const value=URL.createObjectURL(file);U(value);return()=>URL.revokeObjectURL(value)},[file]);return url?<img src={url} alt="Vista previa de la hoja"/>:<span className="document-pdf">PDF</span>}
+export default function DocumentInput({name,required=false,multiple=false,accept='image/jpeg,image/png,image/webp,application/pdf'}){
+ const file=useRef(null),camera=useRef(null),[files,F]=useState([]),[error,E]=useState(''),[busy,B]=useState(false);
+ function restore(rows){const transfer=new DataTransfer();rows.forEach(f=>transfer.items.add(f));if(file.current)file.current.files=transfer.files;}
+ function select(next){E('');if(next.length>(multiple?10:1)){E('Máximo '+(multiple?10:1)+' archivos. No se agregó la selección.');restore(files);return;}if(next.some(f=>f.size>12*1024*1024)||next.reduce((n,f)=>n+f.size,0)>24*1024*1024){E('Máximo 12 MB por archivo y 24 MB en total. No se agregó la selección.');restore(files);return;}F(next);restore(next);}
+ function append(rows){select(multiple?[...files,...rows]:rows.slice(0,1));}
+ useEffect(()=>{const form=file.current?.form,reset=()=>{F([]);E('');if(camera.current)camera.current.value=''};form?.addEventListener('reset',reset);return()=>form?.removeEventListener('reset',reset)},[]);
+ async function capture(){E('');if(!Capacitor.isNativePlatform()){camera.current.click();return;}B(true);try{const photo=await Camera.getPhoto({quality:85,width:2000,height:2000,resultType:CameraResultType.Uri,source:CameraSource.Camera,saveToGallery:false});const response=await fetch(photo.webPath),blob=await response.blob();append([new File([blob],'captura-'+Date.now()+'.jpg',{type:'image/jpeg'})]);}catch(e){E('No se obtuvo la fotografía. '+(e.message||''));}finally{B(false)}}
+ function move(index,delta){const next=[...files];[next[index],next[index+delta]]=[next[index+delta],next[index]];select(next);}
+ return <span className="document-input"><input ref={file} name={name} type="file" multiple={multiple} accept={accept} required={required} onChange={e=>append(Array.from(e.target.files))}/><button type="button" className="secondary" disabled={busy||multiple&&files.length>=10} onClick={capture}>{busy?'Abriendo cámara…':multiple?'Fotografiar otra hoja':'Abrir cámara'}</button><input ref={camera} className="document-camera" aria-label="Tomar fotografía" type="file" accept="image/*" capture="environment" onChange={e=>{append(Array.from(e.target.files));e.target.value=''}}/>
+ <small>{error&&<span role="alert">{error} </span>}{multiple?'Hasta 10 fotos o PDF · 12 MB por archivo · 24 MB en total. Las nuevas selecciones se agregan a las anteriores.':'Elige un archivo o toma una fotografía.'} Las imágenes se optimizan al guardar. La cámara requiere permiso.</small>
+ {!!files.length&&<span className="document-pages">{files.map((f,i)=><span className="document-page" key={i+'-'+f.name}><Preview file={f}/><span>{i+1}. {f.name}</span><span className="document-page-actions">{multiple&&<><button type="button" className="secondary" aria-label={'Subir hoja '+(i+1)} disabled={i===0} onClick={()=>move(i,-1)}>↑</button><button type="button" className="secondary" aria-label={'Bajar hoja '+(i+1)} disabled={i===files.length-1} onClick={()=>move(i,1)}>↓</button></>}<button type="button" className="danger" onClick={()=>select(files.filter((_,j)=>i!==j))}>Quitar</button></span></span>)}</span>}
+ </span>;
+}
