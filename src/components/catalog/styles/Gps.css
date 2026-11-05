@@ -7,3 +7,5 @@
 
 .gps-global-banner{max-width:calc(100vw - 32px);overflow-wrap:anywhere}
 @media(max-width:650px){.gps-global-banner{left:12px;right:12px;max-width:none;font-size:11px}}
+.gps-exit-form textarea{display:block;width:100%;margin-top:6px;padding:10px;border:1px solid #b8c8d9;border-radius:8px;font:inherit;resize:vertical}
+.gps-trip .catalog-card:focus-visible,.gps-documents input:focus-visible{outline:2px solid #125493;outline-offset:2px}

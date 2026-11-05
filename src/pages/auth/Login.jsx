@@ -8,7 +8,7 @@ export default function Login({ step, login, loading, message, Step }) {
   return (
     <main className="login">
       <div className="loginbox">
-        <img src="/logo.png" />
+        <img className="login-brand" src="/logo.png" alt="GUAYACA" width="90" height="90"/>
         <h1>GUAYACA Transport</h1>
         <p>Control de viajes</p>
         <form onSubmit={login}>

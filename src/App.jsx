@@ -1,3 +1,6 @@
+import {Device} from './services/native/device.js';
+import {Capacitor} from '@capacitor/core';
+import {cacheResponse} from './services/offline/queue.js';
 import {AutoPrepareTrips} from './components/catalog/TripPreparation.jsx';
 import {prepareTrip} from './services/offline/preparation.js';
 import OfflinePanel from './components/catalog/OfflinePanel.jsx';
@@ -28,6 +31,15 @@ import Progress from "./pages/Progress.jsx";
 import Control from "./pages/Control.jsx";
 import Profile from "./pages/Profile.jsx";
 import ActivateAccount from "./pages/auth/ActivateAccount.jsx";
+const android=Capacitor.getPlatform()==='android';
+const nativeLogin=android?{client:'android'}:{};
+async function sessionRequest(path,options={},timeout=8000){
+  if(!android)return api(path,options);
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),timeout);
+  try{return await api(path,{...options,signal:controller.signal});}
+  finally{clearTimeout(timer);}
+}
 export default function App() {
   const [user, setUser] = useState(null),
     [section, SetSection] = useState(currentSection),
@@ -42,6 +54,7 @@ export default function App() {
     [loading, Ld] = useState(false),
     [step, Step] = useState(null),
     [challenge, C] = useState("");
+  const [restorePending,setRestorePending]=useState(()=>android&&!!getBearer());
   function S(value){const next=user?allowedSection(user,value):value;SetSection(next);writeSection(next);}
   useEffect(()=>{const pop=()=>{if(!user)return;const next=allowedSection(user,currentSection());SetSection(next);T(null);writeSection(next,true)};window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop)},[user]);
   const [activationToken, setActivationToken] = useState(() => {
@@ -76,21 +89,33 @@ export default function App() {
       Ld(false);
     }
   };
-  useEffect(() => {
-    if (getBearer())
-      run(async () => {
-        try {
-          {
-            let u = await api("/me");
-            setUser(u);
-            const target=allowedSection(u,currentSection());SetSection(target);writeSection(target,true);
-          }
-        } catch {
-          sessionStorage.removeItem("token");
-          setBearer("");
+  function openSession(u){
+    setUser(u);
+    const target=allowedSection(u,currentSection());SetSection(target);writeSection(target,true);
+  }
+  async function restoreSession(){
+    if(!getBearer())return;
+    await run(async()=>{
+      try{
+        openSession(await sessionRequest('/me'));
+        setRestorePending(false);
+      }catch(e){
+        if(!android||e.status===401||e.status===403){
+          await clearSession(android?'Tu sesión ya no está autorizada. Vuelve a ingresar.':'');
+        }else{
+          setRestorePending(true);
+          M('No pudimos comprobar tu sesión. Sigue guardada en el dispositivo; vuelve a intentar cuando tengas conexión.');
         }
-      });
-  }, []);
+      }
+    });
+  }
+  useEffect(()=>{restoreSession()},[]);
+  useEffect(()=>{
+    if(!restorePending||user)return;
+    const retry=()=>restoreSession();
+    window.addEventListener('online',retry);
+    return ()=>window.removeEventListener('online',retry);
+  },[restorePending,user]);
   async function refresh() {
     if (!user) return;
     if (section === "viajes" || section === "reportes") {
@@ -116,11 +141,11 @@ export default function App() {
       let r = step
         ? await api("/auth/code", {
             method: "POST",
-            body: { step, challenge, code: f.get("code") },
+            body: { step, challenge, code: f.get("code"), ...nativeLogin },
           })
         : await api("/auth/login", {
             method: "POST",
-            body: Object.fromEntries(f),
+            body: {...Object.fromEntries(f),...nativeLogin},
           });
       if (r.step) {
         Step(r.step);
@@ -128,26 +153,38 @@ export default function App() {
       } else {
         await setBearer(r.token);
         sessionStorage.setItem("token", r.token);
-        setUser(r.user);
-        const target=allowedSection(r.user,currentSection());SetSection(target);writeSection(target,true);
+        if(android)await cacheResponse('/me',r.user).catch(()=>{});
+        openSession(r.user);
         Step(null);
       }
     }, step ? 'Verificando el código…' : 'Iniciando sesión…');
   }
-  function clearSession(message = '') {
+  async function clearSession(message = '') {
     stopGps();
-    setBearer('');
     sessionStorage.removeItem('token');
+    await setBearer('');
+    setRestorePending(false);
     setUser(null); T(null); D([]); U([]); V([]); ST(null); A([]); SetControl(null); Step(null); setMenuOpen(false); S('viajes'); M(message);
   }
   async function exit() {
     setLoadingText('Cerrando sesión…');
     Ld(true);
     let warning = '';
-    try { await api('/auth/logout', {method:'POST'}); }
+    try { await sessionRequest('/auth/logout',{method:'POST'},5000); }
     catch { warning = 'La sesión se cerró en este dispositivo, pero no se pudo confirmar el cierre en el servidor.'; }
-    finally { clearSession(warning); Ld(false); }
+    finally { try{await clearSession(warning)}catch(e){M(e.message)}finally{Ld(false)} }
   }
+  const [noticeTarget,setNoticeTarget]=useState(null);
+  async function openNoticeTrip(id,notice){
+    await run(async()=>{await detail(id);setNoticeTarget(notice&&(notice.stop_id!=null||notice.position!=null)?{...notice,trip_id:id}:null);S('viajes');},'Abriendo viaje…');
+  }
+  useEffect(()=>{
+    if(!android||!user)return;
+    let active=true,listener;
+    const take=async()=>{try{const target=await Device.takeAlertTarget();if(active&&target.trip_id&&String(target.owner)===String(user.id))await openNoticeTrip(target.trip_id,target);}catch{}};
+    Device.addListener('tripAlertOpened',take).then(h=>{if(active){listener=h;take()}else h.remove()}).catch(()=>{});
+    return()=>{active=false;listener?.remove()};
+  },[user?.id]);
   async function detail(id) {
     T(await api("/trips/" + id));prepareTrip(id).catch(()=>{});
   }
@@ -163,7 +200,13 @@ export default function App() {
       M("Guardado correctamente");
     }, 'Guardando información…');
   };
-  if (activationToken) return <ActivateAccount token={activationToken} onBack={async () => { if (getBearer()) { try { await api('/auth/logout',{method:'POST'}); } catch {} } clearSession(); setActivationToken(''); }}/>;
+  if (activationToken) return <ActivateAccount token={activationToken} onBack={async () => { if (getBearer()) { try { await api('/auth/logout',{method:'POST'}); } catch {} } await clearSession(); setActivationToken(''); }}/>;
+  if(restorePending&&!user)return <main className="login"><div className="loginbox">
+    <img src="/logo.png" alt="GUAYACA"/><h1>Tu sesión está guardada</h1>
+    <p>{message||'Estamos recuperando tu acceso…'}</p>
+    <div className="modal-actions"><button disabled={loading} onClick={restoreSession}>Reintentar</button><button disabled={loading} className="secondary" onClick={exit}>Cerrar sesión</button></div>
+    {loading&&<LoadingOverlay message={loadingText}/>}
+  </div></main>;
   if (!user)
     return (
       <>
@@ -173,7 +216,7 @@ export default function App() {
     );
   return (
     <div className={'layout'+(collapsed ? ' sidebar-collapsed' : '')}>
-      <Header onNotificationCount={SetNotificationCount} onOpenInbox={()=>{S("notificaciones");T(null);setMenuOpen(false)}} onOpenTrip={id=>run(async()=>{await detail(id);S("viajes")})} user={user} exit={exit} menuOpen={menuOpen} onToggleMenu={() => setMenuOpen(value => !value)} menuButtonRef={menuButtonRef} onOpenProfile={() => {S("perfil");T(null);setMenuOpen(false)}}/>
+      <Header onNotificationCount={SetNotificationCount} onOpenInbox={()=>{S("notificaciones");T(null);setMenuOpen(false)}} onOpenTrip={openNoticeTrip} user={user} exit={exit} menuOpen={menuOpen} onToggleMenu={() => setMenuOpen(value => !value)} menuButtonRef={menuButtonRef} onOpenProfile={() => {S("perfil");T(null);setMenuOpen(false)}}/>
       <Sidebar notificationCount={notificationCount} admin={admin} user={user} section={section} S={S} T={T} collapsed={collapsed} onToggleCollapsed={toggleCollapsed} mobile={mobile} open={menuOpen} onClose={closeMenu}/>
       {loading && <LoadingOverlay message={loadingText}/>}
       <AutoPrepareTrips user={user}/><GpsBanner/><GpsGuard user={user}/>
@@ -183,7 +226,7 @@ export default function App() {
             {message}
           </div>
         )}
-        {section === "notificaciones" && <Notifications admin={admin} onOpenTrip={id=>run(async()=>{await detail(id);S("viajes")})}/>}
+        {section === "notificaciones" && <Notifications admin={admin} onOpenTrip={openNoticeTrip}/>}
         {section === "mantenimientos" && admin && <Maintenances/>}
         
         {section === "cobros" && admin && <Collections/>}
@@ -213,10 +256,14 @@ export default function App() {
         )}
         {section === "viajes" && trip && (
           <Trip
+            key={trip.trip.id}
             detail={trip}
+            noticeTarget={noticeTarget}
+            onNoticeFocused={()=>setNoticeTarget(null)}
             refresh={() => detail(trip.trip.id)}
             back={() => {
               T(null);
+              setNoticeTarget(null);
               run(refresh);
             }}
             run={run}

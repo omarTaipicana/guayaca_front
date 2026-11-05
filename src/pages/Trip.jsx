@@ -1,3 +1,4 @@
+import {getPosition,authorizeLocation} from '../services/native/location.js';
 import TripControl from '../components/catalog/TripControl.jsx';
 import DocumentInput from '../components/common/DocumentInput.jsx';
 import SimulationControls from '../components/catalog/SimulationControls.jsx';
@@ -7,37 +8,20 @@ import { useState } from "react";
 import { api, download } from "../services/api.js";
 import { money, date, labels } from "../services/format.js";
 import TripMap from "../components/common/TripMap.jsx";
-export default function Trip({ detail, refresh, back, run, admin,currentUser }) {
+export default function Trip({ detail, refresh, back, run, admin,currentUser,noticeTarget,onNoticeFocused }) {
   let { trip: t, events, expenses, files,deliveries=[] } = detail;
   const [eventType,EventType]=useState('');
   const [expenseType,ExpenseType]=useState('combustible');
   let [geo, G] = useState(null),
     [geoState, GS] = useState("Sin solicitar");
-  const getGeo = () => {
-    if (!navigator.geolocation) {
-      GS("No disponible");
-      return;
-    }
+  const getGeo = async () => {
     GS("Obteniendo ubicación...");
-    navigator.geolocation.getCurrentPosition(
-      (p) => {
-        G({
-          latitude: p.coords.latitude,
-          longitude: p.coords.longitude,
-          accuracy: p.coords.accuracy,
-        });
-        GS(
-          "Ubicación lista; precisión aproximada " +
-            Math.round(p.coords.accuracy) +
-            " m",
-        );
-      },
-      () => {
-        G(null);
-        GS("Ubicación denegada o no disponible");
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
-    );
+    try {
+      await authorizeLocation();
+      const {coords}=await getPosition({enableHighAccuracy:true,timeout:15000,maximumAge:0});
+      G({latitude:coords.latitude,longitude:coords.longitude,accuracy:coords.accuracy});
+      GS("Ubicación lista · "+Math.round(coords.accuracy)+" m");
+    } catch(e) { G(null); GS(e.message||"Ubicación no disponible"); }
   };
   let km =
     events.length > 1
@@ -48,9 +32,9 @@ export default function Trip({ detail, refresh, back, run, admin,currentUser }) 
       <button className="secondary" onClick={back}>
         ← Volver a viajes
       </button>
-      <h1>{t.code} · {t.is_test?'PRUEBA':'REAL'}</h1>{t.is_test&&<p className="catalog-info">Viaje de prueba: no se incluirá en resultados ni cortes de cobro y no modifica el kilometraje real.</p>}{t.is_test&&admin&&<SimulationControls trip={t} onUpdated={refresh}/>}{t.metadata?.capacity_warning&&<p className="catalog-info">{t.metadata.capacity_warning}</p>}{Number(t.standby_amount)>0&&<p className="catalog-info">Tarifa base: ${money(t.base_amount)} · Stand by: ${money(t.standby_amount)} · Total: ${money(t.amount)}</p>}
-      {t.metadata?.route&&<><h2>Ruta calculada al crear el viaje</h2><PlannedRouteMap route={t.metadata.route} points={[t.metadata.origin_place,...t.metadata.destination_places]}/><GpsTrip trip={t} user={currentUser} onUpdated={refresh}/><TripControl trip={t} admin={admin} onUpdated={refresh}/><p>Tarifa de referencia al crear: {t.metadata.priced_destination?.name||t.metadata.farthest?.name} · ${money(t.metadata.amount)} · {t.tonnage} t</p><p>Flete vigente: ${money(t.base_amount)} · Stand by registrado: ${money(t.standby_amount)}. Los cargos pendientes requieren revisión antes del cobro.</p><ul>{t.metadata.destination_places.map((p,i)=><li key={p.id}>{p.name}</li>)}</ul></>}
-      {t.metadata&&<details><summary>Datos conservados al crear el viaje</summary>{t.metadata.client&&<p>Cliente histórico: {t.metadata.client?.name||t.metadata.client}</p>}{t.metadata.client?.document_number&&<p>Cédula/RUC: {t.metadata.client.document_number}</p>}<p>Origen: {t.metadata.origin_place?.name||t.metadata.origin||'—'}</p><p>Destinos: {t.metadata.destination_places?.map(p=>p.name).join(' → ')||t.metadata.destination||'—'}</p><p>Categoría: {t.metadata.category?.name||'Sin categoría registrada'} · Valor guardado: ${money(t.metadata.amount??t.amount)}</p>{t.metadata.rates?.map((r,i)=><p key={i}>Tarifa registrada: ${money(r.amount)} · {r.active?'Activa':'Inactiva'}</p>)}<small>{t.metadata.legacy?'Viaje anterior: se conservaron los textos existentes.':'Estos datos no cambian al editar o eliminar lugares o tarifas.'}</small></details>}
+      <h1>{t.code} · {t.is_test?'PRUEBA':'REAL'}</h1>{admin&&t.is_test&&<p className="catalog-info">Viaje de prueba: no se incluirá en resultados ni cortes de cobro y no modifica el kilometraje real.</p>}{t.is_test&&admin&&<SimulationControls trip={t} onUpdated={refresh}/>}{t.metadata?.capacity_warning&&<p className="catalog-info">{t.metadata.capacity_warning}</p>}{admin&&Number(t.standby_amount)>0&&<p className="catalog-info">Tarifa base: ${money(t.base_amount)} · Stand by: ${money(t.standby_amount)} · Total: ${money(t.amount)}</p>}
+      {t.metadata?.route&&<><h2>Ruta calculada al crear el viaje</h2><PlannedRouteMap route={t.metadata.route} points={[t.metadata.origin_place,...t.metadata.destination_places]}/><GpsTrip trip={t} user={currentUser} onUpdated={refresh} noticeTarget={noticeTarget} onNoticeFocused={onNoticeFocused}/><TripControl trip={t} admin={admin} onUpdated={refresh}/>{admin&&<><p>Tarifa de referencia al crear: {t.metadata.priced_destination?.name||t.metadata.farthest?.name} · ${money(t.metadata.amount)} · {t.tonnage} t</p><p>Flete vigente: ${money(t.base_amount)} · Stand by registrado: ${money(t.standby_amount)}. Los cargos pendientes requieren revisión antes del cobro.</p><ul>{t.metadata.destination_places.map((p,i)=><li key={p.id}>{p.name}</li>)}</ul></>}</>}
+      {admin&&t.metadata&&<details><summary>Datos conservados al crear el viaje</summary>{t.metadata.client&&<p>Cliente histórico: {t.metadata.client?.name||t.metadata.client}</p>}{t.metadata.client?.document_number&&<p>Cédula/RUC: {t.metadata.client.document_number}</p>}<p>Origen: {t.metadata.origin_place?.name||t.metadata.origin||'—'}</p><p>Destinos: {t.metadata.destination_places?.map(p=>p.name).join(' → ')||t.metadata.destination||'—'}</p><p>Categoría: {t.metadata.category?.name||'Sin categoría registrada'} · Valor guardado: ${money(t.metadata.amount??t.amount)}</p>{t.metadata.rates?.map((r,i)=><p key={i}>Tarifa registrada: ${money(r.amount)} · {r.active?'Activa':'Inactiva'}</p>)}<small>{t.metadata.legacy?'Viaje anterior: se conservaron los textos existentes.':'Estos datos no cambian al editar o eliminar lugares o tarifas.'}</small></details>}
       <p>
         {t.origin || "Origen"} → {t.destination || "Destino"} ·{" "}
         {t.status.replace("_", " ")}
@@ -60,10 +44,10 @@ export default function Trip({ detail, refresh, back, run, admin,currentUser }) 
           <strong>{km.toFixed(1)} km</strong>
           <span>Odómetro</span>
         </article>
-        <article>
+        {admin&&<article>
           <strong>${money(t.amount)}</strong>
           <span>Valor del viaje</span>
-        </article>
+        </article>}
         <article>
           <strong>
             ${money(expenses.reduce((a, x) => a + Number(x.amount), 0))}
@@ -185,9 +169,8 @@ export default function Trip({ detail, refresh, back, run, admin,currentUser }) 
           <button>Guardar gasto y recibo</button>
         </form>
       </details>
-      <details>
+      {!t.metadata?.route&&<details>
         <summary>Adjuntar guía</summary>
-        {t.metadata?.route&&<p>Las guías de cada punto se suben en sus pendientes de cada punto. Aquí puedes adjuntar una guía adicional.</p>}
         <form
           className="grid"
           onSubmit={(e) => {
@@ -211,7 +194,7 @@ export default function Trip({ detail, refresh, back, run, admin,currentUser }) 
           </label>
           <button>Subir guía</button>
         </form>
-      </details>
+      </details>}
       <h2>Puntos del viaje</h2>
       <div className="cards">
         {events.map((x) => (

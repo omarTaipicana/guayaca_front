@@ -1,0 +1,18 @@
+.responsive-table{display:grid;gap:10px;min-width:0;padding:4px}
+.responsive-table:empty{display:none}
+.responsive-table-row{min-width:0;overflow-wrap:anywhere;border:1px solid #dce7f0;border-radius:12px;background:#fff;color:#253b54}
+.responsive-table-overview{display:flex;gap:10px;align-items:flex-start;padding:12px}
+.responsive-table-primary{display:grid;gap:5px;min-width:0}
+.responsive-table-title{font-weight:700;color:#07346b}
+.responsive-table-row small{display:block;margin-top:2px}
+.responsive-table-check{flex:none;min-width:25px;padding-top:2px}
+.responsive-table-check input{width:20px;height:20px}
+.responsive-table-row summary{padding:10px 12px;min-height:42px;color:#07558f;font-weight:650}
+.responsive-table-row summary:focus-visible{outline:2px solid #07558f;outline-offset:-3px;border-radius:8px}
+.responsive-table-fields{display:grid;gap:8px;padding:0 12px 12px;margin:0}
+.responsive-table-fields>div{min-width:0;padding:8px 0 0;border-top:1px solid #e8eef4}
+.responsive-table-fields dt{font-size:.78rem;font-weight:650;color:#506981}
+.responsive-table-fields dd{margin:3px 0 0}
+.responsive-table-fields :is(.catalog-row-actions,.plan-actions,.zones-row-actions){display:flex;flex-wrap:wrap;justify-content:flex-start;gap:6px}
+.responsive-table-fields button{white-space:normal;max-width:100%}
+.responsive-table-group{margin:8px 0 0;padding:4px 8px;font-weight:700;color:#07346b}

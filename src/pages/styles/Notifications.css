@@ -1,1 +1,22 @@
 .notification-folders{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}.notification-folders button[aria-pressed="true"]{box-shadow:0 0 0 3px #d8e7f8}.notification-read-hint{color:#526b83;font-size:14px}.catalog-table td input[type="checkbox"]:disabled{opacity:.4;cursor:not-allowed}
+
+@media(max-width:767px){
+ .notifications-page{min-width:0;grid-template-columns:minmax(0,1fr);overflow-wrap:anywhere}
+ .notifications-page > *,.notifications-page input{min-width:0;max-width:100%}
+ .notifications-page .notification-bulk-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));margin-top:0;gap:8px}
+ .notifications-page button{min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+ .notifications-page .catalog-modal .catalog-footer{flex-wrap:wrap;justify-content:flex-start}
+ .notifications-page .catalog-modal-head h2{min-width:0;overflow-wrap:anywhere}
+ .notifications-page .catalog-modal-head button{flex-shrink:0}
+}
+
+.notification-selection-toggle{justify-self:start}
+.notification-list{min-width:0;list-style:none;margin:0;padding:0;border:1px solid #dce7f0;border-radius:12px;background:#fff}
+.notification-list li{display:flex;align-items:center;min-width:0;padding:0 12px;gap:8px}
+.notification-list li+li{border-top:1px solid #e6ebf1}
+.notification-list input{flex:none;width:18px;height:18px}
+.notifications-page .notification-item{display:flex;align-items:center;justify-content:space-between;gap:8px;flex:1;min-width:0;padding:10px 0;background:transparent;color:#163451;text-align:left}
+.notification-item-copy{display:grid;gap:3px;min-width:0;overflow-wrap:anywhere}
+.notification-item small{color:#526b83;font-weight:400}
+.notification-item.is-unread strong{color:#07558f}
+.notification-item>span:last-child{font-size:1.35rem;color:#526b83}

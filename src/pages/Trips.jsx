@@ -25,7 +25,7 @@ export default function Trips({
   return (
     <>
       {deleting&&<DeleteRecord resource="trips" id={deleting.id} label={deleting.code} onClose={()=>Deleting(null)} onDeleted={refresh}/>}
-      {bulk&&<BulkDelete resource="trips" rows={data.filter(t=>selected.includes(String(t.id)))} onClose={()=>Bulk(false)} onDeleted={async()=>{Selected([]);await refresh()}}/>}<h1>Viajes</h1><TripModeControl admin={admin}/>
+      {bulk&&<BulkDelete resource="trips" rows={data.filter(t=>selected.includes(String(t.id)))} onClose={()=>Bulk(false)} onDeleted={async()=>{Selected([]);await refresh()}}/>}<h1>Viajes</h1>{admin&&<TripModeControl admin={admin}/>}
       <p>Consulta y registra los movimientos del viaje.</p>
       <button onClick={()=>Creating(true)}>Crear viaje</button>
       {creating&&<CreateTrip admin={admin} onClose={()=>Creating(false)} onCreated={refresh}/>}
@@ -40,11 +40,9 @@ export default function Trips({
               {t.origin || "Origen"} → {t.destination || "Destino"}
             </p>
             <p>
-              {t.plate} · {t.driver}
+              {t.plate}{admin&&t.driver&&' · '+t.driver}
             </p>
-            <p>
-              Ingreso ${money(t.amount)} · Gastos ${money(t.expenses)}
-            </p>
+            {admin&&<p>Ingreso ${money(t.amount)} · Gastos ${money(t.expenses)}</p>}
             <button onClick={() => run(() => detail(t.id))}>Abrir viaje</button> {!admin&&['creado','en_curso'].includes(t.status)&&<TripPreparation id={t.id}/>} {admin&&<button className="danger" onClick={()=>Deleting(t)}>Eliminar viaje</button>}
           </article>
         ))}

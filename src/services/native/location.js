@@ -1,6 +1,24 @@
-import {Capacitor} from '@capacitor/core';import {Geolocation} from '@capacitor/geolocation';
-export const nativeLocation=Capacitor.isNativePlatform();
-export async function locationPermission(){if(nativeLocation){const p=await Geolocation.checkPermissions();return p.location==='granted'?'granted':p.location==='denied'?'denied':'prompt'}if(navigator.permissions)return (await navigator.permissions.query({name:'geolocation'})).state;return 'prompt';}
-export async function getPosition(options){if(nativeLocation){const p=await Geolocation.checkPermissions();if(p.location!=='granted'){const r=await Geolocation.requestPermissions();if(r.location!=='granted'){const e=Error('Permiso de ubicación precisa denegado');e.code=1;throw e;}}return Geolocation.getCurrentPosition(options)}return new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(resolve,reject,options));}
-export async function watchPosition(ok,error,options){if(nativeLocation){await getPosition(options);return Geolocation.watchPosition(options,(p,e)=>{if(e)error(e);else if(p)ok(p)})}return navigator.geolocation.watchPosition(ok,error,options);}
-export function clearPositionWatch(id){if(nativeLocation)return Geolocation.clearWatch({id}).catch(()=>{});navigator.geolocation?.clearWatch(id);}
+import {Capacitor} from '@capacitor/core';
+import {Geolocation} from '@capacitor/geolocation';
+export const nativeLocation=Capacitor.getPlatform()==='android';
+const precise=p=>p.location==='granted'?'granted':(p.location==='denied'||p.coarseLocation==='granted')?'denied':'prompt';
+export async function locationPermission(){
+ if(nativeLocation)return precise(await Geolocation.checkPermissions());
+ try{return (await navigator.permissions?.query({name:'geolocation'}))?.state||'prompt';}catch{return 'prompt';}
+}
+export async function authorizeLocation(){
+ if(!nativeLocation&&await locationPermission()==='granted')return;
+ if(!nativeLocation)return getPosition({enableHighAccuracy:true,timeout:20000,maximumAge:0});
+ const state=await locationPermission();
+ if(state==='granted')return;
+ if(state==='denied'||precise(await Geolocation.requestPermissions({permissions:['location']}))!=='granted')throw Error('Activa Ubicación precisa en Ajustes de Android → Aplicaciones → GUAYACA → Permisos.');
+}
+export async function getPosition(options){
+ if(nativeLocation){
+  if(await locationPermission()!=='granted')throw Error('Falta el permiso de ubicación precisa');
+  return Geolocation.getCurrentPosition(options);
+ }
+ return new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(resolve,reject,options));
+}
+export function watchPosition(ok,error,options){return navigator.geolocation.watchPosition(ok,error,options);}
+export function clearPositionWatch(id){navigator.geolocation?.clearWatch(id);}

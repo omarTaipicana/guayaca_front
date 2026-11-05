@@ -17,6 +17,6 @@
 
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenAnimatedIcon">@drawable/guayaca_logo</item><item name="windowSplashScreenBackground">#07346b</item><item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/guayaca_splash_icon</item><item name="windowSplashScreenBackground">#07346b</item><item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
     </style>
 </resources>

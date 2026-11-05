@@ -4,3 +4,5 @@
 .loginbox h1,.loginbox>p{text-align:center}
 
 .recovery-login-link{display:block;width:100%;background:transparent;color:#15558a;font-size:.85rem;padding:12px 4px}.recovery-login-link:hover{text-decoration:underline}
+
+.loginbox .login-brand{width:90px;max-width:100%;height:auto;aspect-ratio:1;object-fit:contain}
