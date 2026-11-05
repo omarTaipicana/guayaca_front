@@ -53,6 +53,7 @@ export default function Login({ step, login, loading, message, Step }) {
         </form>
         {!step && <button type="button" className="recovery-login-link" onClick={() => setRecover(true)}>¿Olvidaste tu contraseña?</button>}
         {message && <div className="notice">{message}</div>}
+        <p><a href="/privacidad/index.html">Política de privacidad</a></p>
         <Mascot/>
       </div>
     </main>
