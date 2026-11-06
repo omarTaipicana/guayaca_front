@@ -1,3 +1,4 @@
+import {MAX_ROUTE_ACCURACY} from '../gpsRouting.js';
 import {nativeLocation} from '../native/location.js';import {Device} from '../native/device.js';
 import {rawApi,getBearer} from '../http.js';import {getLocal,putLocal,listLocal,deleteLocal} from './store.js';
 export function ownerId(){try{const s=getBearer().split('.')[1].replace(/-/g,'+').replace(/_/g,'/');return String(JSON.parse(atob(s)).sub||'')}catch{return ''}}
@@ -100,7 +101,7 @@ export async function retryOperation(id){const owner=ownerId(),o=await getLocal(
 export async function queueRequest(path,options){const owner=ownerId();if(!owner)throw Error('Inicia sesión antes de registrar operaciones offline');await importNativeGps(owner);if(owner!==ownerId())throw Error('La cuenta cambió');const m=match(path),trip_id=m[1],kind=m[2]==='gps'?'gps':m[2]==='expenses'?'expense':m[2]==='outcomes'?'outcome':m[4]==='exit'?'exit':'point';let body,file=null,files=[];
  if(options.body instanceof FormData){body={};for(const [k,v] of options.body.entries()){if(v instanceof File){if(v.size)files.push(await packedFile(v))}else body[k]=v;}}else body={...(options.body||{})};
  if(files.length>10||kind!=='point'&&files.length>1)throw Error('La guía admite hasta 10 archivos; los demás registros admiten uno');if(files.reduce((n,f)=>n+Math.floor(f.base64.length*3/4),0)>24*1024*1024)throw Error('Los adjuntos superan 24 MB en total');if(files.length===1){file=files[0];files=[];}
- if(kind==='gps'){const copy=await cached('/trips/'+trip_id+'/gps-state'),point=copy?.data.stops.find(s=>!s.departed_at);const limit=Math.max(25,Math.min(100,Number(point?.place.radius_m||150)/2));if(!Number.isFinite(+body.accuracy)||+body.accuracy>limit)throw Error('Precisión GPS insuficiente; espera señal precisa antes de guardar coordenadas.');}
+ if(kind==='gps'&&(!Number.isFinite(+body.accuracy)||+body.accuracy<0||+body.accuracy>MAX_ROUTE_ACCURACY))throw Error('Precisión GPS insuficiente; espera señal precisa antes de guardar coordenadas.');
  let position=null;if(['point','exit'].includes(kind)){const state=await cached('/trips/'+trip_id+'/gps-state');position=state?.data.stops.find(s=>String(s.id)===m[3])?.position;if(position==null&&options.position!=null)position=options.position;if(position==null)throw Error('Abre el viaje con conexión primero para guardar sus puntos.');}
  if(await getLocal(deletedKey(owner,trip_id)))throw Error('El viaje fue eliminado. No se pueden registrar más datos.');
  const pending=await pendingOperations(owner);if(pending.length>=20000)throw Error('Hay 20.000 operaciones pendientes; sincroniza antes de registrar más.');

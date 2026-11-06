@@ -66,7 +66,7 @@ public final class TripTrackerService extends Service implements LocationListene
     private boolean hasGuide(JSONObject s){return has(s,"arrival_file_id")||s.optBoolean("document_waived");}
     private boolean hasKm(JSONObject s){return has(s,"arrival_odometer");}
     private boolean incident(JSONObject s){String v=s.optString("outcome");return "partial".equals(v)||"rejected".equals(v)||"failed".equals(v);}
-    private JSONObject nextStop(){for(int i=0;i<stops.length();i++){JSONObject s=stops.optJSONObject(i);if(s!=null&&!has(s,"departed_at"))return s;}return null;}
+    private JSONObject firstPending(){for(int i=0;i<stops.length();i++){JSONObject s=stops.optJSONObject(i);if(s!=null&&!has(s,"departed_at"))return s;}return null;}
     boolean matches(String user,String id){return user.equals(owner)&&id.equals(trip);}
     boolean hasFix(){return healthy;}
     String tripId(){return trip;}
@@ -82,28 +82,46 @@ public final class TripTrackerService extends Service implements LocationListene
             String choice=body.getString("choice");s.put("exit_state",choice);
             if("delivered".equals(choice)||"incident".equals(choice))s.put("departed_at",s.get("outside_at"));
         }
-        if(nextStop()==null)stopSelf();
+        if(firstPending()==null)stopSelf();
     }
 
     @Override public void onLocationChanged(Location fix) {
         if(stops==null||!fix.hasAccuracy())return;
         long at=fix.getTime(),now=System.currentTimeMillis();
         if(at<=lastSaved||now-at>120000||at-now>30000)return;
-        JSONObject s=nextStop();
-        if(s==null){stopSelf();return;}
-        JSONObject p=s.optJSONObject("place");if(p==null)return;
-        double radius=p.optDouble("radius_m",150);
-        double acc=fix.getAccuracy();if(!Double.isFinite(acc)||acc<0||acc>Math.max(25,Math.min(100,radius/2)))return;
+        if(firstPending()==null){stopSelf();return;}
+        double acc=fix.getAccuracy();
+        if(!Double.isFinite(acc)||acc<0||acc>100)return;
         healthy=true;
-        float[] d=new float[1];Location.distanceBetween(fix.getLatitude(),fix.getLongitude(),p.optDouble("latitude"),p.optDouble("longitude"),d);
-        boolean inside=d[0]<=radius,outside=d[0]>=radius+Math.max(50,acc);
-        String kind=!has(s,"arrived_at")?(inside?"arrival":""):has(s,"outside_at")?(inside?"return":""):(outside?"departure":"");
-        int pos=s.optInt("position");
-        if(lastRoute==null){lastRoute=new Location(fix);lastRouteAt=at;}
-        boolean route=(at-lastRouteAt>=8000&&fix.distanceTo(lastRoute)>=Math.max(30,acc+lastRoute.getAccuracy()));
+        JSONObject s=null, active=null;
+        String kind="";
+        double nearest=Double.POSITIVE_INFINITY;
+        float[] d=new float[1];
+        for(int i=0;i<stops.length();i++){
+            JSONObject row=stops.optJSONObject(i);
+            if(row==null||has(row,"departed_at"))continue;
+            if(row.optInt("position")==0){active=row;break;}
+            if(active==null&&has(row,"arrived_at")&&!has(row,"outside_at"))active=row;
+        }
+        for(int i=0;i<stops.length();i++){
+            JSONObject row=stops.optJSONObject(i);
+            if(row==null||has(row,"departed_at")||(active!=null&&row!=active))continue;
+            JSONObject place=row.optJSONObject("place");if(place==null)continue;
+            double radius=place.optDouble("radius_m",150);
+            if(acc>Math.max(25,Math.min(100,radius/2)))continue;
+            Location.distanceBetween(fix.getLatitude(),fix.getLongitude(),place.optDouble("latitude"),place.optDouble("longitude"),d);
+            if(row==active&&has(row,"arrived_at")){
+                if(d[0]>=radius+Math.max(50,acc)){s=row;kind="departure";}
+            }else if(d[0]<=radius&&(s==null||d[0]<nearest||d[0]==nearest&&row.optInt("position")<s.optInt("position"))){
+                s=row;nearest=d[0];kind=has(row,"arrived_at")?"return":"arrival";
+            }
+        }
+        JSONObject p=s==null?null:s.optJSONObject("place");
+        int pos=s==null?-1:s.optInt("position");
+        boolean route=lastRoute==null||(at-lastRouteAt>=8000&&fix.distanceTo(lastRoute)>=Math.max(30,acc+lastRoute.getAccuracy()));
         boolean start=!kind.isEmpty()&&(!kind.equals(candidate)||pos!=candidatePosition||at-lastSaved>90000);
         boolean confirm=!kind.isEmpty()&&!start&&at-candidateAt>=20000;
-        boolean reset=kind.isEmpty()&&!candidate.isEmpty()&&pos==candidatePosition;
+        boolean reset=kind.isEmpty()&&!candidate.isEmpty();
         if(!route&&!start&&!confirm&&!reset)return;
         try{
             ContentValues values=new ContentValues();values.put("id",UUID.randomUUID().toString());values.put("owner",owner);values.put("trip",trip);
@@ -127,7 +145,7 @@ public final class TripTrackerService extends Service implements LocationListene
                 }
                 candidate="";
             }else if(reset)candidate="";
-            if(nextStop()==null)stopSelf();
+            if(firstPending()==null)stopSelf();
         }catch(RuntimeException|JSONException e){android.util.Log.e("GuayacaGPS","No se pudo guardar la ubicación",e);healthy=false;stopSelf();}
     }
     @Override public void onProviderDisabled(String provider){healthy=false;}

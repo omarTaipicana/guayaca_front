@@ -11,7 +11,6 @@ const paths = {
   vehiculos: <><path d="M3 7h11v9H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="17" r="2"/><circle cx="18" cy="17" r="2"/></>,
   actividad: <><path d="M3 12h4l2-6 4 12 2-6h6"/></>,
   almacenamiento: <><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></>,
-  avance: <><path d="M5 20V5h14v15H5zM8 9h8M8 13h8M8 17h5"/><path d="m15.5 17 1 1 2-2"/></>,
   menu: <><path d="M4 7h16M4 12h16M4 17h16"/></>,
   cerrar: <><path d="M6 6l12 12M18 6 6 18"/></>,
   izquierda: <><path d="m14 6-6 6 6 6"/></>,

@@ -27,7 +27,6 @@ import Reports from "./pages/Reports.jsx";
 import Vehicles from "./pages/Vehicles.jsx";
 import Users from "./pages/Users.jsx";
 import Activity from "./pages/Activity.jsx";
-import Progress from "./pages/Progress.jsx";
 import Control from "./pages/Control.jsx";
 import Profile from "./pages/Profile.jsx";
 import ActivateAccount from "./pages/auth/ActivateAccount.jsx";
@@ -325,21 +324,6 @@ export default function App() {
         )}
         {section === "actividad" && (
           <Activity
-            {...{
-              admin,
-              data,
-              users,
-              vehicles,
-              run,
-              refresh,
-              submit,
-              detail,
-              audit,
-            }}
-          />
-        )}
-        {section === "avance" && (
-          <Progress
             {...{
               admin,
               data,

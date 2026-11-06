@@ -1,3 +1,4 @@
+import {gpsCandidate,MAX_ROUTE_ACCURACY} from './gpsRouting.js';
 import {api} from './api.js';
 import {nativeLocation,authorizeLocation,getPosition,watchPosition,clearPositionWatch} from './native/location.js';
 import {Device} from './native/device.js';
@@ -46,16 +47,14 @@ export async function startGps(id){
   if(token!==generation||busy||fix.timestamp<=lastSaved||Date.now()-fix.timestamp>120000)return;
   busy=true;
   try{
-   const snap=await projectedTrip(id),stop=snap?.stops.find(s=>!s.departed_at);
+   const snap=await projectedTrip(id),stops=snap?.stops||[];
    if(token!==generation)return;
-   if(!stop){stopGps();return;}
-   const {latitude,longitude,accuracy}=fix.coords,radius=Number(stop.place.radius_m||150),at=fix.timestamp;
-   if(!Number.isFinite(accuracy)||accuracy>Math.max(25,Math.min(100,radius/2)))return;
-   const d=distance(fix.coords,stop.place),inside=d<=radius,outside=d>=radius+Math.max(50,accuracy);
-   const kind=!stop.arrived_at?(inside?'arrival':null):stop.outside_at?(inside?'return':null):(outside?'departure':null);
-   if(!lastRoute)lastRoute={latitude,longitude,accuracy,device_at:new Date(at).toISOString()};
-   const route=(at-+new Date(lastRoute.device_at)>=8000&&distance(lastRoute,fix.coords)>=Math.max(30,accuracy+Number(lastRoute.accuracy||0)));
-   const evidence=kind?stop.candidate_type!==kind||at-+new Date(stop.candidate_at)>=20000||at-lastSaved>90000:!!stop.candidate_type;
+   if(!stops.some(s=>!s.departed_at)){stopGps();return;}
+   const {latitude,longitude,accuracy}=fix.coords,at=fix.timestamp;
+   if(!Number.isFinite(accuracy)||accuracy<0||accuracy>MAX_ROUTE_ACCURACY)return;
+   const {stop,kind}=gpsCandidate(stops,fix.coords)||{};
+   const route=!lastRoute||(at-+new Date(lastRoute.device_at)>=8000&&distance(lastRoute,fix.coords)>=Math.max(30,accuracy+Number(lastRoute.accuracy||0)));
+   const evidence=stops.some(s=>s!==stop&&s.candidate_type)||(kind&&(stop.candidate_type!==kind||at-+new Date(stop.candidate_at)>=20000||at-lastSaved>90000));
    if(!route&&!evidence)return;
    const timestamp=new Date(at).toISOString();
    await api('/trips/'+id+'/gps',{method:'POST',body:{latitude,longitude,accuracy,timestamp,route_point:route}});
