@@ -1,4 +1,5 @@
 import {nativeLocation} from '../../services/native/location.js';
+import {Device} from '../../services/native/device.js';
 import TripPreparation from './TripPreparation.jsx';
 import {prepareTrip} from '../../services/offline/preparation.js';
 import {projectedTrip} from '../../services/offline/projection.js';
@@ -92,6 +93,14 @@ export default function GpsTrip({trip,user,onUpdated,noticeTarget,onNoticeFocuse
     {!admin&&data.local_projection&&<span>Datos guardados pendientes de sincronización</span>}
   </p>
   {!admin&&!nativeLocation&&!closed&&<small>En la web, mantén GUAYACA abierta para registrar el recorrido.</small>}
+  {!admin&&nativeLocation&&!closed&&!routeDone&&<details className="gps-diagnostics">
+    <summary>Seguimiento con la pantalla cerrada</summary>
+    <p>{trackHere&&tracking.lastCapturedAt?'Último punto guardado: '+date(tracking.lastCapturedAt):'Espera la primera ubicación antes de cerrar la pantalla.'}</p>
+    {trackHere&&tracking.notificationsEnabled===false&&<p>Activa las notificaciones de GUAYACA y el canal de avisos de viaje.</p>}
+    {trackHere&&tracking.batteryOptimized===true&&<p>En los ajustes de GUAYACA, revisa Batería y permite el uso en segundo plano o elige «Sin restricciones» si aparece.</p>}
+    <p>Antes de salir de la app, comprueba que la notificación de seguimiento indique «Recibiendo ubicación del viaje».</p>
+    <button type="button" className="secondary" onClick={()=>Device.openTrackingSettings().catch(e=>E(e.message))}>Abrir ajustes de Android</button>
+  </details>}
   {admin&&<>{Number(trip.metadata.route?.distance_m)>0&&<p className="route-state">Ruta sugerida: {(Number(trip.metadata.route.distance_m)/1000).toLocaleString('es-EC',{maximumFractionDigits:1})} km · {Math.round(Number(trip.metadata.route.duration_s||0)/60)} min estimados</p>}<TripPreparation id={trip.id}/>{data.stops.some(s=>s.arrived_at)&&<p><strong>Orden real de llegadas:</strong> {data.stops.filter(s=>s.arrived_at).sort((a,b)=>new Date(a.arrived_at)-new Date(b.arrived_at)).map(s=>s.place.name).join(' → ')}</p>}<h2>Llegadas, salidas y pendientes</h2>{cards(visibleStops)}</>}
   {saved&&<p className="catalog-info" role="status">{saved}</p>}
   {error&&panel!=='documents'&&<p className="catalog-error" role="alert">{error}</p>}

@@ -10,8 +10,18 @@ import android.os.Build;
 
 final class NativeAlerts {
     private NativeAlerts(){}
+    private static String channelId(boolean sound,boolean vibration){
+        return "guayaca_s"+(sound?"1":"0")+"v"+(vibration?"1":"0")+"_v2";
+    }
+    static boolean enabled(Context ctx,String owner){
+        NotificationManager manager=ctx.getSystemService(NotificationManager.class);
+        if(!manager.areNotificationsEnabled()||(Build.VERSION.SDK_INT>=33&&ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED))return false;
+        SharedPreferences p=ctx.getSharedPreferences("guayaca_alerts_native",Context.MODE_PRIVATE);
+        NotificationChannel current=manager.getNotificationChannel(channelId(p.getBoolean(owner+":sound",true),p.getBoolean(owner+":vibration",true)));
+        return current==null||current.getImportance()!=NotificationManager.IMPORTANCE_NONE;
+    }
     static String channel(Context ctx,boolean sound,boolean vibration){
-        String id="guayaca_s"+(sound?"1":"0")+"v"+(vibration?"1":"0")+"_v2";
+        String id=channelId(sound,vibration);
         NotificationChannel channel=new NotificationChannel(id,"GUAYACA · "+(sound?"sonido":"sin sonido")+" · "+(vibration?"vibración":"sin vibración"),NotificationManager.IMPORTANCE_HIGH);
         channel.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
         if(vibration)channel.setVibrationPattern(new long[]{0,220,100,220});
@@ -26,7 +36,7 @@ final class NativeAlerts {
     }
     static boolean post(Context ctx,String owner,String title,String body,int id,String trip,String stop,int position){
         NotificationManager manager=ctx.getSystemService(NotificationManager.class);
-        if(!manager.areNotificationsEnabled()||(Build.VERSION.SDK_INT>=33&&ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED))return false;
+        if(!enabled(ctx,owner))return false;
         android.content.SharedPreferences p=ctx.getSharedPreferences("guayaca_alerts_native",Context.MODE_PRIVATE);
         String channel=channel(ctx,p.getBoolean(owner+":sound",true),p.getBoolean(owner+":vibration",true));
         if(manager.getNotificationChannel(channel).getImportance()==NotificationManager.IMPORTANCE_NONE)return false;

@@ -132,9 +132,24 @@ public class GuayacaSessionPlugin extends Plugin {
     }
     @PluginMethod public void trackingStatus(PluginCall call){
         TripTrackerService tracker=TripTrackerService.active;
-        JSObject result=new JSObject();boolean active=tracker!=null&&tracker.ownedBy(call.getString("owner",""));result.put("active",active);
+        String owner=call.getString("owner","");
+        JSObject result=new JSObject();boolean active=tracker!=null&&tracker.ownedBy(owner);result.put("active",active);
+        Context ctx=getContext();
+        android.os.PowerManager power=ctx.getSystemService(android.os.PowerManager.class);
+        if(power!=null)result.put("batteryOptimized",!power.isIgnoringBatteryOptimizations(ctx.getPackageName()));
+        result.put("notificationsEnabled",NativeAlerts.enabled(ctx,owner));
         if(active){result.put("healthy",tracker.hasFix());result.put("trip",tracker.tripId());result.put("lastCapturedAt",tracker.lastCapturedAt());try{result.put("fix",tracker.latestFix());}catch(org.json.JSONException ignored){}}
         call.resolve(result);
+    }
+    @PluginMethod public void openTrackingSettings(PluginCall call){
+        getActivity().runOnUiThread(()->{
+            try{
+                Context ctx=getContext();
+                android.content.Intent intent=new android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.fromParts("package",ctx.getPackageName(),null));
+                getActivity().startActivity(intent);call.resolve();
+            }catch(RuntimeException e){call.reject("Abre Ajustes → Aplicaciones → GUAYACA");}
+        });
     }
     @PluginMethod public void trackingAction(PluginCall call){
         getActivity().runOnUiThread(()->{

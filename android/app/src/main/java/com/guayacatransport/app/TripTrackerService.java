@@ -24,6 +24,17 @@ public final class TripTrackerService extends Service implements LocationListene
     private Location lastFix;
     private boolean healthy;
     private Database database;
+    private final Handler handler=new Handler(Looper.getMainLooper());
+    private static final long FIX_FRESH_MS=30000L, ROUTE_HEARTBEAT_MS=60000L;
+    private final Runnable updateStatus=new Runnable(){
+        @Override public void run(){
+            if(active!=TripTrackerService.this)return;
+            try{
+                getSystemService(NotificationManager.class).notify(6021,trackingNotification(hasFix()));
+            }catch(RuntimeException e){android.util.Log.w("GuayacaGPS","No se pudo actualizar el aviso de seguimiento",e);}
+            handler.postDelayed(this,30000);
+        }
+    };
 
     static final class Database extends SQLiteOpenHelper {
         Database(Context context) { super(context.getApplicationContext(), "guayaca_tracking.db", null, 2); }
@@ -42,15 +53,19 @@ public final class TripTrackerService extends Service implements LocationListene
     }
 
     @Override public IBinder onBind(Intent intent) { return null; }
-    @Override public int onStartCommand(Intent intent,int flags,int startId) {
-        NotificationManager nm=getSystemService(NotificationManager.class);
-        nm.createNotificationChannel(new NotificationChannel(STATUS_CHANNEL,"Seguimiento del viaje",NotificationManager.IMPORTANCE_LOW));
+    private Notification trackingNotification(boolean hasSignal){
         Intent launch=getPackageManager().getLaunchIntentForPackage(getPackageName());
         Notification.Builder status=new Notification.Builder(this,STATUS_CHANNEL).setSmallIcon(R.drawable.ic_guayaca_notification)
-            .setContentTitle("GUAYACA · Seguimiento activo").setContentText("Guardando el recorrido del viaje").setOngoing(true);
+            .setContentTitle("GUAYACA · Seguimiento del viaje")
+            .setContentText(hasSignal?"Recibiendo ubicación del viaje":"Esperando una ubicación precisa")
+            .setOnlyAlertOnce(true).setOngoing(true);
         if(launch!=null)status.setContentIntent(PendingIntent.getActivity(this,1,launch,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT));
+        return status.build();
+    }
+    @Override public int onStartCommand(Intent intent,int flags,int startId) {
         try {
-            startForeground(6021,status.build());
+            getSystemService(NotificationManager.class).createNotificationChannel(new NotificationChannel(STATUS_CHANNEL,"Seguimiento del viaje",NotificationManager.IMPORTANCE_LOW));
+            startForeground(6021,trackingNotification(hasFix()));
             if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED) throw new SecurityException();
             if(database==null)database=new Database(this);
             SQLiteDatabase db=database.getWritableDatabase();
@@ -76,7 +91,14 @@ public final class TripTrackerService extends Service implements LocationListene
             healthy=false;saveCheckpoint(db);
             manager=getSystemService(LocationManager.class);
             manager.requestLocationUpdates(LocationManager.GPS_PROVIDER,5000L,0f,this,Looper.getMainLooper());
+            try{
+                if(manager.getAllProviders().contains(LocationManager.NETWORK_PROVIDER))
+                    manager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER,10000L,0f,this,Looper.getMainLooper());
+            }catch(IllegalArgumentException|SecurityException e){android.util.Log.w("GuayacaGPS","Proveedor de apoyo no disponible",e);}
             active=this;
+            handler.removeCallbacks(updateStatus);
+            handler.post(updateStatus);
+            android.util.Log.i("GuayacaGPS",intent==null?"Seguimiento restaurado por Android":"Servicio de seguimiento iniciado");
             if(!MainActivity.visible)TrackingSyncJob.schedule(this);
             return START_STICKY;
         } catch (Exception e) { android.util.Log.w("GuayacaGPS","No se pudo iniciar seguimiento",e);stopSelf();return START_NOT_STICKY; }
@@ -104,6 +126,7 @@ public final class TripTrackerService extends Service implements LocationListene
     private void clearAndStop(){try{if(database!=null)database.getWritableDatabase().delete("tracking_session",null,null);}finally{stopSelf();}}
     @Override public void onTaskRemoved(Intent rootIntent){
         super.onTaskRemoved(rootIntent);
+        android.util.Log.i("GuayacaGPS","Tarea retirada de Recientes; continúa el servicio de ubicación");
         TrackingSyncJob.schedule(this);
     }
     private boolean has(JSONObject o,String k){return o.has(k)&&!o.isNull(k)&&!o.optString(k).isEmpty();}
@@ -112,7 +135,7 @@ public final class TripTrackerService extends Service implements LocationListene
     private boolean incident(JSONObject s){String v=s.optString("outcome");return "partial".equals(v)||"rejected".equals(v)||"failed".equals(v);}
     private JSONObject firstPending(){for(int i=0;i<stops.length();i++){JSONObject s=stops.optJSONObject(i);if(s!=null&&!has(s,"departed_at"))return s;}return null;}
     boolean matches(String user,String id){return owner!=null&&owner.equals(user)&&trip!=null&&trip.equals(id);}
-    boolean hasFix(){return healthy;}
+    boolean hasFix(){return healthy&&lastFix!=null&&System.currentTimeMillis()-lastFix.getTime()<=FIX_FRESH_MS;}
     String tripId(){return trip;}
     boolean ownedBy(String user){return owner!=null&&owner.equals(user);}
     JSONObject latestFix() throws JSONException {return encodeFix(lastFix);}
@@ -140,6 +163,9 @@ public final class TripTrackerService extends Service implements LocationListene
         if(firstPending()==null){clearAndStop();return;}
         double acc=fix.getAccuracy();
         if(!Double.isFinite(acc)||acc<0||acc>100)return;
+        // Prefer fresh satellite readings; use the system network provider as a backup.
+        if(!LocationManager.GPS_PROVIDER.equals(fix.getProvider())&&lastFix!=null&&
+            LocationManager.GPS_PROVIDER.equals(lastFix.getProvider())&&at-lastFix.getTime()<15000L)return;
         healthy=true;lastFix=new Location(fix);
         JSONObject s=null, active=null;
         String kind="";
@@ -166,7 +192,8 @@ public final class TripTrackerService extends Service implements LocationListene
         }
         JSONObject p=s==null?null:s.optJSONObject("place");
         int pos=s==null?-1:s.optInt("position");
-        boolean route=lastRoute==null||(at-lastRouteAt>=8000&&fix.distanceTo(lastRoute)>=Math.max(30,acc+lastRoute.getAccuracy()));
+        boolean route=lastRoute==null||at-lastRouteAt>=ROUTE_HEARTBEAT_MS||
+            (at-lastRouteAt>=8000&&fix.distanceTo(lastRoute)>=Math.max(30,acc+lastRoute.getAccuracy()));
         boolean start=!kind.isEmpty()&&(!kind.equals(candidate)||pos!=candidatePosition||at-lastSaved>90000);
         boolean confirm=!kind.isEmpty()&&!start&&at-candidateAt>=20000;
         boolean reset=kind.isEmpty()&&!candidate.isEmpty();
@@ -208,15 +235,20 @@ public final class TripTrackerService extends Service implements LocationListene
             if(complete)db.delete("tracking_session",null,null);else saveCheckpoint(db);
             db.setTransactionSuccessful();
             }finally{db.endTransaction();}
-            if(alertPlace!=null)NativeAlerts.post(this,owner,alertTitle,alertMessage,(owner+":"+trip+":"+pos+":"+kind).hashCode(),trip,null,pos);
             if(!MainActivity.visible||firstPending()==null){lastNetworkCheck=at;TrackingSyncJob.schedule(this);}
+            if(alertPlace!=null){
+                try{NativeAlerts.post(this,owner,alertTitle,alertMessage,(owner+":"+trip+":"+pos+":"+kind).hashCode(),trip,null,pos);}
+                catch(RuntimeException e){android.util.Log.w("GuayacaGPS","No se pudo mostrar la alerta local; GPS continúa",e);}
+            }
             if(firstPending()==null)stopSelf();
         }catch(RuntimeException|JSONException e){android.util.Log.e("GuayacaGPS","No se pudo guardar la ubicación",e);healthy=false;stopSelf();}
     }
-    @Override public void onProviderDisabled(String provider){healthy=false;}
+    @Override public void onProviderDisabled(String provider){if(lastFix!=null&&provider.equals(lastFix.getProvider()))healthy=false;}
     @Override public void onProviderEnabled(String provider){}
     @Override public void onStatusChanged(String provider,int status,Bundle extras){}
     @Override public void onDestroy(){
+        handler.removeCallbacks(updateStatus);
+        android.util.Log.i("GuayacaGPS","Servicio de seguimiento detenido");
         if(manager!=null)manager.removeUpdates(this);
         if(database!=null)database.close();
         if(active==this)active=null;

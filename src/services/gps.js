@@ -24,7 +24,7 @@ export async function readNativeGps(){
   const s=await Device.trackingStatus({owner:ownerId()});
   if(s.active&&!trip)trip=String(s.trip);
   const matches=s.active&&String(s.trip)===String(trip);
-  if(trip)emit(matches?(s.healthy?'Seguimiento activo':'Buscando señal GPS'):'Seguimiento detenido',{active:matches,healthy:matches&&!!s.healthy,fix:matches?s.fix||null:null,lastCapturedAt:matches?s.lastCapturedAt||null:null});
+  if(trip)emit(matches?(s.healthy?'Seguimiento activo':'Esperando ubicación precisa'):'Seguimiento detenido',{active:matches,healthy:matches&&!!s.healthy,fix:matches?s.fix||null:null,lastCapturedAt:matches?s.lastCapturedAt||null:null,batteryOptimized:s.batteryOptimized,notificationsEnabled:s.notificationsEnabled});
   syncNow().catch(()=>{});
  }finally{polling=false;}
 }
