@@ -1,4 +1,4 @@
-const API = import.meta.env.VITE_API_URL || "/api";
+export const API = import.meta.env.VITE_API_URL || "/api";
 let bearer = sessionStorage.getItem("token") || "";
 export const getBearer = () => bearer;
 export const setBearer = (value) => {

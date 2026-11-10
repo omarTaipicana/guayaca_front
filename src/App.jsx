@@ -1,7 +1,9 @@
 import {Device} from './services/native/device.js';
 import {Capacitor} from '@capacitor/core';
-import {cacheResponse} from './services/offline/queue.js';
+import {cacheResponse,cached,ownerId} from './services/offline/queue.js';
 import {AutoPrepareTrips} from './components/catalog/TripPreparation.jsx';
+import {getLocal,putLocal,deleteLocal} from './services/offline/store.js';
+import {rawApi} from './services/http.js';
 import {prepareTrip} from './services/offline/preparation.js';
 import OfflinePanel from './components/catalog/OfflinePanel.jsx';
 import GpsGuard from './components/catalog/GpsGuard.jsx';
@@ -32,11 +34,11 @@ import Profile from "./pages/Profile.jsx";
 import ActivateAccount from "./pages/auth/ActivateAccount.jsx";
 const android=Capacitor.getPlatform()==='android';
 const nativeLogin=android?{client:'android'}:{};
-async function sessionRequest(path,options={},timeout=8000){
+async function sessionRequest(path,options={},timeout=8000,networkOnly=false){
   if(!android)return api(path,options);
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),timeout);
-  try{return await api(path,{...options,signal:controller.signal});}
+  try{return await (networkOnly?rawApi:api)(path,{...options,signal:controller.signal});}
   finally{clearTimeout(timer);}
 }
 export default function App() {
@@ -92,33 +94,61 @@ export default function App() {
     setUser(u);
     const target=allowedSection(u,currentSection());SetSection(target);writeSection(target,true);
   }
-  async function restoreSession(){
-    if(!getBearer())return;
-    await run(async()=>{
-      try{
-        openSession(await sessionRequest('/me'));
-        setRestorePending(false);
-      }catch(e){
-        if(!android||e.status===401||e.status===403){
-          await clearSession(android?'Tu sesión ya no está autorizada. Vuelve a ingresar.':'');
-        }else{
-          setRestorePending(true);
-          M('No pudimos comprobar tu sesión. Sigue guardada en el dispositivo; vuelve a intentar cuando tengas conexión.');
-        }
-      }
-    });
+  const checkingSession=useRef(false);
+  const activeTripKey=owner=>'last-driver-trip:'+owner;
+  async function resumeTrip(u,owner){
+    if(!android||u.role==='admin'||!u.permissions?.includes('viajes'))return;
+    const native=await Device.trackingStatus({owner}).catch(()=>null);
+    const id=native?.trip||(await getLocal(activeTripKey(owner)))?.id;
+    if(!id)return;
+    const copy=(await cached('/trips/'+id))?.data;
+    if(owner!==ownerId()||!copy||String(copy.trip.driver_id)!==owner||!['creado','en_curso'].includes(copy.trip.status))return;
+    T(existing=>existing||copy);SetSection('viajes');writeSection('viajes',true);
   }
-  useEffect(()=>{restoreSession()},[]);
+  async function restoreSession(){
+    const owner=ownerId(),bearer=getBearer();
+    if(!bearer||checkingSession.current)return;
+    checkingSession.current=true;
+    try{
+      const local=android?(await cached('/me').catch(()=>null))?.data:null;
+      const usable=local&&local.role!=='admin'&&String(local.id)===owner&&local.permissions?.includes('viajes');
+      if(usable&&getBearer()===bearer){openSession(local);setRestorePending(false);await resumeTrip(local,owner).catch(()=>{});}
+      if(!usable||navigator.onLine!==false){
+        const u=await sessionRequest('/me',{},8000,true);
+        if(getBearer()!==bearer)return;
+        if(android)await cacheResponse('/me',u).catch(()=>{});
+        openSession(u);setRestorePending(false);await resumeTrip(u,owner).catch(()=>{});
+      }
+    }catch(e){
+      if(getBearer()!==bearer)return;
+      if(!android||[401,403].includes(e.status))await clearSession(android?'Tu sesión ya no está autorizada. Vuelve a ingresar.':'');
+      else setRestorePending(true);
+    }finally{checkingSession.current=false;}
+  }
+  useEffect(()=>{restoreSession();},[]);
   useEffect(()=>{
-    if(!restorePending||user)return;
-    const retry=()=>restoreSession();
-    window.addEventListener('online',retry);
-    return ()=>window.removeEventListener('online',retry);
-  },[restorePending,user]);
+    const validate=async()=>{
+      if(document.visibilityState==='hidden'||navigator.onLine===false||checkingSession.current)return;
+      const bearer=getBearer();if(!bearer)return;
+      if(!user){await restoreSession();return;}
+      if(!android)return;
+      checkingSession.current=true;
+      try{
+        const u=await sessionRequest('/me',{},8000,true);
+        if(getBearer()!==bearer)return;
+        await cacheResponse('/me',u).catch(()=>{});
+        if(u.role!==user.role||JSON.stringify(u.permissions)!==JSON.stringify(user.permissions)){stopGps();T(null);openSession(u);}
+      }catch(e){if(getBearer()===bearer&&[401,403].includes(e.status))await clearSession('Tu sesión ya no está autorizada. Vuelve a ingresar.');}
+      finally{checkingSession.current=false;}
+    };
+    window.addEventListener('online',validate);document.addEventListener('visibilitychange',validate);
+    const timer=setInterval(validate,60000);
+    return()=>{window.removeEventListener('online',validate);document.removeEventListener('visibilitychange',validate);clearInterval(timer);};
+  },[user?.id,user?.role,user?.permissions]);
   async function refresh() {
     if (!user) return;
     if (section === "viajes" || section === "reportes") {
-      const rows=await api('/trips');D(rows);
+      const rows=await api('/trips',{signal:AbortSignal.timeout(8000)});D(rows);
       if(navigator.onLine!==false)await Promise.allSettled(rows.filter(t=>String(t.driver_id)===String(user.id)&&['creado','en_curso'].includes(t.status)).map(t=>prepareTrip(t.id)));
       if (admin) {
         U(await api("/users"));
@@ -131,7 +161,7 @@ export default function App() {
     else if (section === "control") SetControl(await api("/control-map"));
   }
   useEffect(() => {
-    if (user) run(refresh);
+    if(user){if(android&&!admin&&section==='viajes')refresh().catch(e=>{if(e.status)M(e.message);});else run(refresh);}
   }, [user, section]);
   async function login(e) {
     e.preventDefault();
@@ -159,7 +189,8 @@ export default function App() {
     }, step ? 'Verificando el código…' : 'Iniciando sesión…');
   }
   async function clearSession(message = '') {
-    stopGps();
+    const owner=ownerId();stopGps();
+    if(owner)await deleteLocal(activeTripKey(owner)).catch(()=>{});
     sessionStorage.removeItem('token');
     await setBearer('');
     setRestorePending(false);
@@ -185,8 +216,21 @@ export default function App() {
     return()=>{active=false;listener?.remove()};
   },[user?.id]);
   async function detail(id) {
-    T(await api("/trips/" + id));prepareTrip(id).catch(()=>{});
+    const owner=ownerId(),result=await api("/trips/" + id,{signal:AbortSignal.timeout(8000)});
+    if(owner!==ownerId())return;
+    T(result);
+    if(android&&!admin&&String(result.trip.driver_id)===owner){
+      if(['creado','en_curso'].includes(result.trip.status))await putLocal(activeTripKey(owner),{id:String(id)}).catch(()=>{});
+      else if(String((await getLocal(activeTripKey(owner)).catch(()=>null))?.id)===String(id))await deleteLocal(activeTripKey(owner)).catch(()=>{});
+    }
+    prepareTrip(id).catch(()=>{});
   }
+  useEffect(()=>{
+    const id=trip?.trip.id;if(!id)return;
+    const reload=()=>detail(id).catch(()=>{});
+    window.addEventListener('guayaca:trip-closed',reload);
+    return()=>window.removeEventListener('guayaca:trip-closed',reload);
+  },[trip?.trip.id]);
   const submit = (url, after) => (e) => {
     e.preventDefault();
     let form = e.currentTarget,
@@ -218,7 +262,7 @@ export default function App() {
       <Header onNotificationCount={SetNotificationCount} onOpenInbox={()=>{S("notificaciones");T(null);setMenuOpen(false)}} onOpenTrip={openNoticeTrip} user={user} exit={exit} menuOpen={menuOpen} onToggleMenu={() => setMenuOpen(value => !value)} menuButtonRef={menuButtonRef} onOpenProfile={() => {S("perfil");T(null);setMenuOpen(false)}}/>
       <Sidebar notificationCount={notificationCount} admin={admin} user={user} section={section} S={S} T={T} collapsed={collapsed} onToggleCollapsed={toggleCollapsed} mobile={mobile} open={menuOpen} onClose={closeMenu}/>
       {loading && <LoadingOverlay message={loadingText}/>}
-      <AutoPrepareTrips user={user}/><GpsBanner/><GpsGuard user={user}/>
+      <AutoPrepareTrips user={user}/>{!trip&&<GpsBanner/>}<GpsGuard user={user} openedTrip={trip?.trip}/>
       <main className="content"><OfflinePanel user={user}/>
         {message && (
           <div className="notice" role="status">

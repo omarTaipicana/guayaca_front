@@ -1,10 +1,10 @@
 import ResponsiveTable from '../components/common/ResponsiveTable.jsx';
 import {useEffect,useRef,useState} from 'react';
 import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import {addMapBasemaps} from '../components/common/mapBasemaps.js';
 import {api} from '../services/api.js';
 import './styles/Zones.css';
-function ZoneMap({zone}){const host=useRef(null),map=useRef(null),layer=useRef(null);useEffect(()=>{const m=L.map(host.current).setView([-1.83,-78.18],6);map.current=m;L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors',maxZoom:19}).addTo(m);return()=>{m.remove();map.current=null}},[]);useEffect(()=>{if(layer.current)layer.current.remove();if(zone?.geometry&&map.current){layer.current=L.geoJSON(zone.geometry,{style:{color:'#07346b',weight:2,fillColor:'#ff6a1a',fillOpacity:.22}}).addTo(map.current);const bounds=layer.current.getBounds();if(bounds.isValid())map.current.fitBounds(bounds,{padding:[20,20]});}},[zone]);return <div className="zones-map" ref={host} aria-label="Polígono territorial seleccionado"/>}
+function ZoneMap({zone}){const host=useRef(null),map=useRef(null),layer=useRef(null);useEffect(()=>{const m=L.map(host.current).setView([-1.83,-78.18],6);map.current=m;addMapBasemaps(m);return()=>{m.remove();map.current=null}},[]);useEffect(()=>{if(layer.current)layer.current.remove();if(zone?.geometry&&map.current){layer.current=L.geoJSON(zone.geometry,{style:{color:'#07346b',weight:2,fillColor:'#ff6a1a',fillOpacity:.22}}).addTo(map.current);const bounds=layer.current.getBounds();if(bounds.isValid())map.current.fitBounds(bounds,{padding:[20,20]});}},[zone]);return <div className="zones-map" ref={host} aria-label="Polígono territorial seleccionado"/>}
 const empty={name:'',min_tons:'',max_tons:'',active:true};
 const levels={province:'Provincia',canton:'Cantón',parish:'Parroquia'};
 const money=value=>new Intl.NumberFormat('es-EC',{style:'currency',currency:'USD'}).format(Number(value));

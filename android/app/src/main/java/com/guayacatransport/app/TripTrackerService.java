@@ -6,6 +6,7 @@ import android.content.*;
 import android.content.pm.PackageManager;
 import android.location.*;
 import android.os.*;
+import android.database.Cursor;
 import android.database.sqlite.*;
 import org.json.*;
 import java.util.UUID;
@@ -16,25 +17,32 @@ public final class TripTrackerService extends Service implements LocationListene
     private LocationManager manager;
     private JSONArray stops;
     private String owner, trip;
-    private long lastSaved, lastRouteAt, candidateAt;
+    private long lastSaved, lastRouteAt, candidateAt, lastNetworkCheck;
     private int candidatePosition = -1;
     private String candidate = "";
     private Location lastRoute;
+    private Location lastFix;
     private boolean healthy;
     private Database database;
 
     static final class Database extends SQLiteOpenHelper {
-        Database(Context context) { super(context.getApplicationContext(), "guayaca_tracking.db", null, 1); }
+        Database(Context context) { super(context.getApplicationContext(), "guayaca_tracking.db", null, 2); }
         @Override public void onCreate(SQLiteDatabase db) {
-            db.execSQL("CREATE TABLE points (id TEXT PRIMARY KEY, owner TEXT NOT NULL, trip TEXT NOT NULL, captured INTEGER NOT NULL, lat REAL NOT NULL, lng REAL NOT NULL, accuracy REAL NOT NULL, route INTEGER NOT NULL)");
+            db.execSQL("CREATE TABLE points (id TEXT PRIMARY KEY, owner TEXT NOT NULL, trip TEXT NOT NULL, captured INTEGER NOT NULL, lat REAL NOT NULL, lng REAL NOT NULL, accuracy REAL NOT NULL, route INTEGER NOT NULL, synced INTEGER NOT NULL DEFAULT 0)");
             db.execSQL("CREATE INDEX tracking_owner_time ON points(owner,captured)");
+            createCheckpoint(db);
         }
-        @Override public void onUpgrade(SQLiteDatabase db,int oldVersion,int newVersion) { throw new IllegalStateException("Versión SQLite no compatible"); }
+        private static void createCheckpoint(SQLiteDatabase db){
+            db.execSQL("CREATE TABLE tracking_session (id INTEGER PRIMARY KEY, payload TEXT NOT NULL)");
+            db.execSQL("CREATE TABLE synced_web_gps (id TEXT PRIMARY KEY, captured INTEGER NOT NULL)");
+        }
+        @Override public void onUpgrade(SQLiteDatabase db,int oldVersion,int newVersion) {
+            if(oldVersion<2){db.execSQL("ALTER TABLE points ADD COLUMN synced INTEGER NOT NULL DEFAULT 0");createCheckpoint(db);}
+        }
     }
 
     @Override public IBinder onBind(Intent intent) { return null; }
     @Override public int onStartCommand(Intent intent,int flags,int startId) {
-        if (intent == null) { stopSelf(); return START_NOT_STICKY; }
         NotificationManager nm=getSystemService(NotificationManager.class);
         nm.createNotificationChannel(new NotificationChannel(STATUS_CHANNEL,"Seguimiento del viaje",NotificationManager.IMPORTANCE_LOW));
         Intent launch=getPackageManager().getLaunchIntentForPackage(getPackageName());
@@ -44,32 +52,72 @@ public final class TripTrackerService extends Service implements LocationListene
         try {
             startForeground(6021,status.build());
             if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED) throw new SecurityException();
-            String nextOwner=intent.getStringExtra("owner"), nextTrip=intent.getStringExtra("trip");
-            if (active==this && nextOwner.equals(owner)&&nextTrip.equals(trip)) return START_NOT_STICKY;
-            if(manager!=null)manager.removeUpdates(this);
-            owner=nextOwner;trip=nextTrip;stops=new JSONArray(intent.getStringExtra("stops"));
-            lastSaved=intent.getLongExtra("lastSaved",0);lastRouteAt=0;lastRoute=null;candidate="";candidatePosition=-1;healthy=false;
-            String seed=intent.getStringExtra("route");
-            if(seed!=null){
-                JSONObject r=new JSONObject(seed);
-                lastRoute=new Location(LocationManager.GPS_PROVIDER);lastRoute.setLatitude(r.getDouble("latitude"));lastRoute.setLongitude(r.getDouble("longitude"));lastRoute.setAccuracy((float)r.optDouble("accuracy",0));
-                lastRouteAt=intent.getLongExtra("lastRouteAt",0);
-            }
             if(database==null)database=new Database(this);
+            SQLiteDatabase db=database.getWritableDatabase();
+            JSONObject checkpoint=null;
+            try(Cursor c=db.rawQuery("SELECT payload FROM tracking_session WHERE id=1",null)){
+                if(c.moveToFirst())checkpoint=new JSONObject(c.getString(0));
+            }
+            if(intent!=null&&active==this&&matches(intent.getStringExtra("owner"),intent.getStringExtra("trip")))return START_STICKY;
+            if(manager!=null)manager.removeUpdates(this);
+            if(intent==null){
+                if(checkpoint==null){stopSelf();return START_NOT_STICKY;}
+                owner=checkpoint.getString("owner");trip=checkpoint.getString("trip");stops=checkpoint.getJSONArray("stops");
+                lastSaved=checkpoint.optLong("lastSaved");lastRouteAt=checkpoint.optLong("lastRouteAt");
+                lastRoute=decodeFix(checkpoint.optJSONObject("route"));lastFix=decodeFix(checkpoint.optJSONObject("fix"));
+                candidate=checkpoint.optString("candidate","");candidateAt=checkpoint.optLong("candidateAt");candidatePosition=checkpoint.optInt("candidatePosition",-1);
+            }else{
+                owner=intent.getStringExtra("owner");trip=intent.getStringExtra("trip");stops=new JSONArray(intent.getStringExtra("stops"));
+                lastSaved=intent.getLongExtra("lastSaved",0);lastRouteAt=intent.getLongExtra("lastRouteAt",0);
+                String seed=intent.getStringExtra("route");lastRoute=seed==null?null:decodeFix(new JSONObject(seed));lastFix=lastRoute;
+                candidate="";candidatePosition=-1;candidateAt=0;
+            }
+            if(!owner.equals(GuayacaSessionPlugin.storedOwner(this))||firstPending()==null){clearAndStop();return START_NOT_STICKY;}
+            healthy=false;saveCheckpoint(db);
             manager=getSystemService(LocationManager.class);
             manager.requestLocationUpdates(LocationManager.GPS_PROVIDER,5000L,0f,this,Looper.getMainLooper());
             active=this;
-        } catch (RuntimeException|JSONException e) { android.util.Log.w("GuayacaGPS","No se pudo iniciar seguimiento",e);stopSelf(); }
-        return START_NOT_STICKY;
+            if(!MainActivity.visible)TrackingSyncJob.schedule(this);
+            return START_STICKY;
+        } catch (Exception e) { android.util.Log.w("GuayacaGPS","No se pudo iniciar seguimiento",e);stopSelf();return START_NOT_STICKY; }
+    }
+    private Location decodeFix(JSONObject json) throws JSONException {
+        if(json==null)return null;
+        Location f=new Location(LocationManager.GPS_PROVIDER);
+        f.setLatitude(json.getDouble("latitude"));f.setLongitude(json.getDouble("longitude"));
+        f.setAccuracy((float)json.optDouble("accuracy",0));f.setTime(json.optLong("timestamp",0));return f;
+    }
+    static JSONObject encodeFix(Location f) throws JSONException {
+        return f==null?null:new JSONObject().put("latitude",f.getLatitude()).put("longitude",f.getLongitude())
+                .put("accuracy",f.getAccuracy()).put("timestamp",f.getTime());
+    }
+    private void saveCheckpoint(SQLiteDatabase db) throws JSONException {
+        JSONObject state=new JSONObject().put("owner",owner).put("trip",trip).put("stops",stops)
+            .put("lastSaved",lastSaved).put("lastRouteAt",lastRouteAt).put("route",encodeFix(lastRoute))
+            .put("fix",encodeFix(lastFix)).put("candidate",candidate).put("candidateAt",candidateAt).put("candidatePosition",candidatePosition);
+        ContentValues values=new ContentValues();values.put("id",1);values.put("payload",state.toString());
+        db.replaceOrThrow("tracking_session",null,values);
+    }
+    static void clearCheckpoint(Context context){
+        try(Database d=new Database(context)){d.getWritableDatabase().delete("tracking_session",null,null);}
+    }
+    private void clearAndStop(){try{if(database!=null)database.getWritableDatabase().delete("tracking_session",null,null);}finally{stopSelf();}}
+    @Override public void onTaskRemoved(Intent rootIntent){
+        super.onTaskRemoved(rootIntent);
+        TrackingSyncJob.schedule(this);
     }
     private boolean has(JSONObject o,String k){return o.has(k)&&!o.isNull(k)&&!o.optString(k).isEmpty();}
     private boolean hasGuide(JSONObject s){return has(s,"arrival_file_id")||s.optBoolean("document_waived");}
     private boolean hasKm(JSONObject s){return has(s,"arrival_odometer");}
     private boolean incident(JSONObject s){String v=s.optString("outcome");return "partial".equals(v)||"rejected".equals(v)||"failed".equals(v);}
     private JSONObject firstPending(){for(int i=0;i<stops.length();i++){JSONObject s=stops.optJSONObject(i);if(s!=null&&!has(s,"departed_at"))return s;}return null;}
-    boolean matches(String user,String id){return user.equals(owner)&&id.equals(trip);}
+    boolean matches(String user,String id){return owner!=null&&owner.equals(user)&&trip!=null&&trip.equals(id);}
     boolean hasFix(){return healthy;}
     String tripId(){return trip;}
+    boolean ownedBy(String user){return owner!=null&&owner.equals(user);}
+    JSONObject latestFix() throws JSONException {return encodeFix(lastFix);}
+    long lastCapturedAt(){return lastSaved;}
+    void stopFor(String user,String id){if(matches(user,id))clearAndStop();}
 
     void applyAction(int pos,String kind,JSONObject body) throws JSONException {
         JSONObject s=stops.optJSONObject(pos);if(s==null)return;
@@ -82,17 +130,17 @@ public final class TripTrackerService extends Service implements LocationListene
             String choice=body.getString("choice");s.put("exit_state",choice);
             if("delivered".equals(choice)||"incident".equals(choice))s.put("departed_at",s.get("outside_at"));
         }
-        if(firstPending()==null)stopSelf();
+        if(firstPending()==null)clearAndStop();else saveCheckpoint(database.getWritableDatabase());
     }
 
     @Override public void onLocationChanged(Location fix) {
         if(stops==null||!fix.hasAccuracy())return;
         long at=fix.getTime(),now=System.currentTimeMillis();
         if(at<=lastSaved||now-at>120000||at-now>30000)return;
-        if(firstPending()==null){stopSelf();return;}
+        if(firstPending()==null){clearAndStop();return;}
         double acc=fix.getAccuracy();
         if(!Double.isFinite(acc)||acc<0||acc>100)return;
-        healthy=true;
+        healthy=true;lastFix=new Location(fix);
         JSONObject s=null, active=null;
         String kind="";
         double nearest=Double.POSITIVE_INFINITY;
@@ -122,16 +170,26 @@ public final class TripTrackerService extends Service implements LocationListene
         boolean start=!kind.isEmpty()&&(!kind.equals(candidate)||pos!=candidatePosition||at-lastSaved>90000);
         boolean confirm=!kind.isEmpty()&&!start&&at-candidateAt>=20000;
         boolean reset=kind.isEmpty()&&!candidate.isEmpty();
-        if(!route&&!start&&!confirm&&!reset)return;
+        if(!route&&!start&&!confirm&&!reset){
+            if(!MainActivity.visible&&at-lastNetworkCheck>=60000){lastNetworkCheck=at;TrackingSyncJob.schedule(this);}
+            return;
+        }
+        JSONObject alertPlace=null;String alertMessage=null,alertTitle=null;
         try{
+            SQLiteDatabase db=database.getWritableDatabase();
+            db.beginTransaction();
+            try{
             ContentValues values=new ContentValues();values.put("id",UUID.randomUUID().toString());values.put("owner",owner);values.put("trip",trip);
             values.put("captured",at);values.put("lat",fix.getLatitude());values.put("lng",fix.getLongitude());values.put("accuracy",acc);values.put("route",route?1:0);
-            database.getWritableDatabase().insertOrThrow("points",null,values);
+            db.insertOrThrow("points",null,values);
             lastSaved=at;if(route){lastRoute=new Location(fix);lastRouteAt=at;}
             if(start){candidate=kind;candidateAt=at;candidatePosition=pos;}
             else if(confirm){
                 String captured=java.time.Instant.ofEpochMilli(candidateAt).toString();
-                if("arrival".equals(kind))s.put("arrived_at",captured);
+                if("arrival".equals(kind)){
+                    s.put("arrived_at",captured);
+                    alertPlace=p;alertTitle="Llegaste al punto del viaje";alertMessage=p.optString("name","Punto del viaje");
+                }
                 if("return".equals(kind)){s.put("outside_at",JSONObject.NULL);s.put("exit_state",JSONObject.NULL);}
                 if("departure".equals(kind)){
                     s.put("outside_at",captured);
@@ -140,11 +198,18 @@ public final class TripTrackerService extends Service implements LocationListene
                     s.put("exit_state",closed?(incident(s)?"incident":"delivered"):"pending");
                     if(!done){
                         String missing=(!hasGuide(s)&&!hasKm(s))?"guía y kilometraje":!hasGuide(s)?"guía":"kilometraje";
-                        NativeAlerts.post(this,owner,"Completa el punto del viaje",p.optString("name","Punto del viaje")+" · Falta "+missing,(owner+":"+trip+":"+pos).hashCode(),trip,null,pos);
+                        alertPlace=p;alertTitle="Completa el punto del viaje";
+                        alertMessage=p.optString("name","Punto del viaje")+" · Falta "+missing;
                     }
                 }
                 candidate="";
             }else if(reset)candidate="";
+            boolean complete=firstPending()==null;
+            if(complete)db.delete("tracking_session",null,null);else saveCheckpoint(db);
+            db.setTransactionSuccessful();
+            }finally{db.endTransaction();}
+            if(alertPlace!=null)NativeAlerts.post(this,owner,alertTitle,alertMessage,(owner+":"+trip+":"+pos+":"+kind).hashCode(),trip,null,pos);
+            if(!MainActivity.visible||firstPending()==null){lastNetworkCheck=at;TrackingSyncJob.schedule(this);}
             if(firstPending()==null)stopSelf();
         }catch(RuntimeException|JSONException e){android.util.Log.e("GuayacaGPS","No se pudo guardar la ubicación",e);healthy=false;stopSelf();}
     }

@@ -123,4 +123,4 @@ export async function queueRequest(path,options){const owner=ownerId();if(!owner
  changed();syncNow().catch(()=>{});
  return {queued:true,operation_id:id,pending_state:'pending',message:'Guardado en este dispositivo'};
 }
-export function startSync(){const online=()=>syncNow().catch(()=>{});window.addEventListener('online',online);document.addEventListener('visibilitychange',online);const timer=setInterval(online,15000);online();return()=>{clearInterval(timer);window.removeEventListener('online',online);document.removeEventListener('visibilitychange',online)}}
+export function startSync(){const online=()=>{if(!nativeLocation||document.visibilityState!=='hidden')syncNow().catch(()=>{});};window.addEventListener('online',online);document.addEventListener('visibilitychange',online);const timer=setInterval(online,15000);online();return()=>{clearInterval(timer);window.removeEventListener('online',online);document.removeEventListener('visibilitychange',online)}}

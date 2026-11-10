@@ -1,40 +1,58 @@
 import {useEffect,useRef,useState} from 'react';
+import {LocalNotifications} from '@capacitor/local-notifications';
 import {api} from '../../services/api.js';
-import {projectedTrip} from '../../services/offline/projection.js';
 import {nativeLocation,locationPermission} from '../../services/native/location.js';
 import {gpsStatus,requestLocation,startGps,stopGps,readNativeGps} from '../../services/gps.js';
 import './styles/Gps.css';
 
-export default function GpsGuard({user}){
+const closed=t=>['finalizado','cancelado'].includes(t?.status);
+export default function GpsGuard({user,openedTrip}){
  const driver=user.role!=='admin'&&user.permissions.includes('viajes');
- const [trip,T]=useState(null),[permission,P]=useState('unknown'),[busy,B]=useState(false),[error,E]=useState('');
- const selected=useRef(null);
+ const [needs,Need]=useState(false),[busy,B]=useState(false),[error,E]=useState('');
+ const selected=useRef(null),requested=useRef(false),alertPermission=useRef(false);
+ const eligible=driver&&openedTrip&&!openedTrip.is_test&&String(openedTrip.driver_id)===String(user.id)&&openedTrip.metadata?.origin_place&&openedTrip.metadata?.destination_places?.length;
+ const id=eligible?String(openedTrip.id):null,status=openedTrip?.status;
  useEffect(()=>{
   if(!driver)return;
   let disposed=false,checking=false;
-  async function check(){
+  async function check(verify=false){
    if(checking||document.visibilityState==='hidden')return;
    checking=true;
    try{
-    const p=await locationPermission();if(disposed)return;P(p);
-    await readNativeGps();
-    const active=await api('/gps-session');
-    active.sort((a,b)=>Number(String(b.id)===String(gpsStatus().trip_id))-Number(String(a.id)===String(gpsStatus().trip_id))||Number(b.status==='en_curso')-Number(a.status==='en_curso'));
-    let candidate=null;
-    for(const t of active){const local=await projectedTrip(t.id);if(local?.stops?.length&&!local.route_complete){candidate=t;break;}}
+    await readNativeGps();if(disposed)return;
+    if(id&&closed(openedTrip)){if(String(gpsStatus().trip_id)===id)stopGps();if(selected.current===id)selected.current=null;Need(false);return;}
+    if(id)selected.current=id;
+    const target=selected.current||gpsStatus().trip_id;if(!target)return;
+    let p=await locationPermission();if(disposed)return;
+    if(id&&p==='prompt'&&!requested.current){
+     requested.current=true;
+     try{await requestLocation();p='granted';}catch(e){if(!disposed)E(e.message);}
+    }
     if(disposed)return;
-    selected.current=candidate;T(candidate);
-    if(!candidate||p==='denied'){if(gpsStatus().active)stopGps();return;}
-    if(p==='granted'||!nativeLocation&&gpsStatus().permission==='granted')await startGps(candidate.id);
-   }catch(e){if(!disposed&&[401,403].includes(e.status))stopGps();}finally{checking=false;}
+    Need(p!=='granted');
+    if(p==='granted'){
+     await startGps(target);if(!disposed)E('');
+     if(id&&nativeLocation&&!alertPermission.current){
+      alertPermission.current=true;
+      LocalNotifications.checkPermissions().then(p=>{
+       if(!disposed&&['prompt','prompt-with-rationale'].includes(p.display))return LocalNotifications.requestPermissions();
+      }).catch(()=>{});
+     }
+    }
+    if(verify&&navigator.onLine!==false){
+     const detail=await api('/trips/'+target,{signal:AbortSignal.timeout(8000)});
+     if(!disposed&&closed(detail?.trip)&&String(gpsStatus().trip_id)===String(target)){selected.current=null;stopGps();window.dispatchEvent(new Event('guayaca:trip-closed'));}
+    }
+   }catch(e){if(!disposed){if([401,403,404].includes(e.status))stopGps();else if(id)E(e.message);}}
+   finally{checking=false;}
   }
-  const poll=()=>{if(document.visibilityState!=='hidden')readNativeGps().catch(()=>{});};
+  const resume=()=>check(true),poll=()=>{if(document.visibilityState!=='hidden')readNativeGps().catch(()=>{});};
   check();
-  const timer=setInterval(check,15000),nativeTimer=nativeLocation?setInterval(poll,4000):null;
-  window.addEventListener('guayaca:trips-changed',check);window.addEventListener('online',check);document.addEventListener('visibilitychange',check);
-  return()=>{disposed=true;clearInterval(timer);clearInterval(nativeTimer);window.removeEventListener('guayaca:trips-changed',check);window.removeEventListener('online',check);document.removeEventListener('visibilitychange',check);stopGps();};
- },[user.id,driver]);
- if(!driver||!trip||permission==='unknown'||permission==='granted'&&!error)return null;
- async function activate(){B(true);E('');try{await requestLocation();P('granted');if(selected.current)await startGps(selected.current.id);}catch(e){E(e.message);}finally{B(false);}}
- return <div className="gps-required-banner" role="status"><span>{error||(nativeLocation?'Permite la ubicación precisa de Android para registrar este viaje.':'Permite la ubicación para registrar este viaje.')}</span><button type="button" onClick={activate} disabled={busy}>{busy?'Verificando…':'Habilitar ubicación'}</button></div>;
+  const timer=setInterval(resume,20000),nativeTimer=nativeLocation?setInterval(poll,4000):null;
+  window.addEventListener('online',resume);document.addEventListener('visibilitychange',resume);
+  return()=>{disposed=true;clearInterval(timer);clearInterval(nativeTimer);window.removeEventListener('online',resume);document.removeEventListener('visibilitychange',resume);};
+ },[user.id,driver,id,status]);
+ if(!driver||!id||closed(openedTrip)||!needs&&!error)return null;
+ async function activate(){B(true);E('');try{await requestLocation();Need(false);await startGps(id);}catch(e){E(e.message);}finally{B(false);}}
+ return <div className="gps-required-banner" role="status"><span>{error||'Permite la ubicación precisa para registrar este viaje.'}</span><button type="button" onClick={activate} disabled={busy}>{busy?'Verificando…':'Revisar permiso'}</button></div>;
 }

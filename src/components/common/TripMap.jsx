@@ -1,6 +1,6 @@
 import {useEffect,useRef} from "react";
 import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import {addMapBasemaps} from './mapBasemaps.js';
 
 const valid=x=>x.latitude!=null&&x.longitude!=null&&Number.isFinite(Number(x.latitude))&&Number.isFinite(Number(x.longitude));
 const time=x=>+new Date(x.device_at||x.created_at);
@@ -10,9 +10,7 @@ export default function TripMap({events,gps=false}){
  useEffect(()=>{
   if(!hasPoints)return;
   map.current=L.map(ref.current);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{
-   maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-  }).addTo(map.current);
+  addMapBasemaps(map.current);
   const resize=new ResizeObserver(()=>map.current?.invalidateSize({pan:false}));
   resize.observe(ref.current);
   return()=>{resize.disconnect();map.current.remove();map.current=null;layer.current=null;};

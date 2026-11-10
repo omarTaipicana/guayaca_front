@@ -1,0 +1,8 @@
+.leaflet-container .guayaca-map-switch{margin-top:7px;display:flex;align-items:flex-start;gap:6px}
+.leaflet-container .guayaca-map-switch-button{display:grid;place-items:center;width:34px;height:34px;min-height:0;padding:0;border:1px solid #20364d40;border-radius:6px;background:#fffffff0;color:#43596e;box-shadow:0 1px 3px #10254124;cursor:pointer}
+.leaflet-container .guayaca-map-switch-button svg{width:17px;height:17px;pointer-events:none}
+.leaflet-container .guayaca-map-switch-button:hover,.leaflet-container .guayaca-map-switch-button[aria-pressed="true"]{background:#e9f2fa;color:#12497e}
+.leaflet-container .guayaca-map-switch-button:focus-visible{outline:2px solid #2065a0;outline-offset:2px}
+.leaflet-container .guayaca-map-switch-status{max-width:min(11rem,45vw);padding:4px 7px;border-radius:6px;background:#fffffff5;color:#273a4d;font-size:11px;line-height:1.3;box-shadow:0 1px 3px #10254124}
+.leaflet-container .guayaca-map-switch-status:empty{padding:0;box-shadow:none}
+.guayaca-map-satellite .route-suggested-line{stroke:#ffe497;stroke-opacity:.72}
