@@ -1,6 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {LocalNotifications} from '@capacitor/local-notifications';
 import {api} from '../../services/api.js';
+import {Device} from '../../services/native/device.js';
 import {nativeLocation,locationPermission} from '../../services/native/location.js';
 import {gpsStatus,requestLocation,startGps,stopGps,readNativeGps} from '../../services/gps.js';
 import './styles/Gps.css';
@@ -54,5 +55,5 @@ export default function GpsGuard({user,openedTrip}){
  },[user.id,driver,id,status]);
  if(!driver||!id||closed(openedTrip)||!needs&&!error)return null;
  async function activate(){B(true);E('');try{await requestLocation();Need(false);await startGps(id);}catch(e){E(e.message);}finally{B(false);}}
- return <div className="gps-required-banner" role="status"><span>{error||'Permite la ubicación precisa para registrar este viaje.'}</span><button type="button" onClick={activate} disabled={busy}>{busy?'Verificando…':'Revisar permiso'}</button></div>;
+ return <div className="gps-required-banner" role="status"><span>{error||'Permite la ubicación precisa para registrar este viaje.'}</span><button type="button" onClick={nativeLocation&&needs?()=>Device.openTrackingSettings().catch(e=>E(e.message)):activate} disabled={busy}>{busy?'Verificando…':nativeLocation&&needs?'Abrir ajustes':'Reintentar GPS'}</button></div>;
 }

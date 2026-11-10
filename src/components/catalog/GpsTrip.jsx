@@ -96,8 +96,9 @@ export default function GpsTrip({trip,user,onUpdated,noticeTarget,onNoticeFocuse
   {!admin&&nativeLocation&&!closed&&!routeDone&&<details className="gps-diagnostics">
     <summary>Seguimiento con la pantalla cerrada</summary>
     <p>{trackHere&&tracking.lastCapturedAt?'Último punto guardado: '+date(tracking.lastCapturedAt):'Espera la primera ubicación antes de cerrar la pantalla.'}</p>
-    {trackHere&&tracking.notificationsEnabled===false&&<p>Activa las notificaciones de GUAYACA y el canal de avisos de viaje.</p>}
+    {trackHere&&(tracking.notificationsEnabled===false||tracking.statusNotificationEnabled===false)&&<p>Activa las notificaciones de GUAYACA y los canales de seguimiento y avisos de viaje.</p>}
     {trackHere&&tracking.batteryOptimized===true&&<p>En los ajustes de GUAYACA, revisa Batería y permite el uso en segundo plano o elige «Sin restricciones» si aparece.</p>}
+    {trackHere&&tracking.previousExit&&<p>Android registró una salida reciente: {tracking.previousExit}.</p>}
     <p>Antes de salir de la app, comprueba que la notificación de seguimiento indique «Recibiendo ubicación del viaje».</p>
     <button type="button" className="secondary" onClick={()=>Device.openTrackingSettings().catch(e=>E(e.message))}>Abrir ajustes de Android</button>
   </details>}

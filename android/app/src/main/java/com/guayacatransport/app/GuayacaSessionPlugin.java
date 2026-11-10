@@ -110,18 +110,38 @@ public class GuayacaSessionPlugin extends Plugin {
     @PluginMethod public void startTracking(PluginCall call){
         String owner=call.getString("owner",""),trip=call.getString("trip","");
         com.getcapacitor.JSArray stops=call.getArray("stops");
-        if(!owner.matches("[0-9]+")||!trip.matches("[0-9]+")||stops==null||stops.length()==0){call.reject("Prepara el viaje antes de activar GPS");return;}
+        boolean resumeOnly=Boolean.TRUE.equals(call.getBoolean("resumeOnly",false));
+        if(!owner.matches("[0-9]+")||!trip.matches("[0-9]+")||(!resumeOnly&&(stops==null||stops.length()==0))){
+            call.reject("Prepara el viaje antes de activar GPS");return;
+        }
         android.content.Intent intent=new android.content.Intent(getContext(),TripTrackerService.class)
-            .putExtra("owner",owner).putExtra("trip",trip).putExtra("stops",stops.toString())
+            .putExtra("owner",owner).putExtra("trip",trip).putExtra("resumeOnly",resumeOnly)
             .putExtra("lastSaved",call.getLong("lastSaved",0L)).putExtra("lastRouteAt",call.getLong("lastRouteAt",0L));
+        if(stops!=null)intent.putExtra("stops",stops.toString());
         JSObject route=call.getObject("route");if(route!=null)intent.putExtra("route",route.toString());
         getActivity().runOnUiThread(()->{
+            android.os.Handler handler=new android.os.Handler(android.os.Looper.getMainLooper());
+            java.util.concurrent.atomic.AtomicBoolean completed=new java.util.concurrent.atomic.AtomicBoolean();
+            Runnable timeout=()->{if(completed.compareAndSet(false,true))call.reject("Android no confirmó el arranque del GPS. Abre el viaje y vuelve a intentar.");};
+            android.os.ResultReceiver reply=new android.os.ResultReceiver(handler){
+                @Override protected void onReceiveResult(int code,android.os.Bundle details){
+                    if(!completed.compareAndSet(false,true))return;
+                    handler.removeCallbacks(timeout);
+                    if(code==1)call.resolve();else call.reject(details.getString("message","No se pudo iniciar el GPS"));
+                }
+            };
             try{
+                if(!MainActivity.visible)throw new IllegalStateException("GUAYACA no está visible");
                 String apiUrl=call.getString("apiUrl","");
-                TrackingSyncJob.configure(getContext(),apiUrl);
-                getContext().startForegroundService(intent);call.resolve();
+                // An upload configuration error must not prevent local GPS capture.
+                try{TrackingSyncJob.configure(getContext(),apiUrl);}
+                catch(IllegalArgumentException e){android.util.Log.w("GuayacaGPS","Sin API válida para sincronización nativa");}
+                handler.postDelayed(timeout,6000);
+                getContext().startForegroundService(intent.putExtra(TripTrackerService.START_RESULT,reply));
+            }catch(RuntimeException e){
+                handler.removeCallbacks(timeout);
+                if(completed.compareAndSet(false,true))call.reject("Abre GUAYACA y revisa el permiso de ubicación precisa");
             }
-            catch(RuntimeException e){call.reject("Abre GUAYACA y revisa el permiso de ubicación precisa");}
         });
     }
     @PluginMethod public void stopTracking(PluginCall call){
@@ -129,6 +149,27 @@ public class GuayacaSessionPlugin extends Plugin {
             try{TripTrackerService.clearCheckpoint(getContext());getContext().stopService(new android.content.Intent(getContext(),TripTrackerService.class));call.resolve();}
             catch(RuntimeException e){getContext().stopService(new android.content.Intent(getContext(),TripTrackerService.class));call.reject("No se pudo limpiar el estado del GPS");}
         });
+    }
+    private static final long PROCESS_STARTED_AT=System.currentTimeMillis();
+    private boolean exitChecked;
+    private String lastExit;
+    private String recentExit(Context context){
+        if(android.os.Build.VERSION.SDK_INT<30)return null;
+        try{
+            android.app.ActivityManager am=context.getSystemService(android.app.ActivityManager.class);
+            java.util.List<android.app.ApplicationExitInfo> exits=am.getHistoricalProcessExitReasons(null,0,1);
+            if(exits.isEmpty())return null;
+            android.app.ApplicationExitInfo exit=exits.get(0);
+            if(exit.getTimestamp()>PROCESS_STARTED_AT||System.currentTimeMillis()-exit.getTimestamp()>30*60*1000L)return null;
+            switch(exit.getReason()){
+                case android.app.ApplicationExitInfo.REASON_USER_REQUESTED: return "cierre solicitado desde el sistema";
+                case android.app.ApplicationExitInfo.REASON_LOW_MEMORY: return "memoria insuficiente";
+                case android.app.ApplicationExitInfo.REASON_CRASH:
+                case android.app.ApplicationExitInfo.REASON_CRASH_NATIVE: return "fallo de la aplicación";
+                case android.app.ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE: return "restricción de recursos";
+                default: return null;
+            }
+        }catch(RuntimeException ignored){return null;}
     }
     @PluginMethod public void trackingStatus(PluginCall call){
         TripTrackerService tracker=TripTrackerService.active;
@@ -138,7 +179,25 @@ public class GuayacaSessionPlugin extends Plugin {
         android.os.PowerManager power=ctx.getSystemService(android.os.PowerManager.class);
         if(power!=null)result.put("batteryOptimized",!power.isIgnoringBatteryOptimizations(ctx.getPackageName()));
         result.put("notificationsEnabled",NativeAlerts.enabled(ctx,owner));
-        if(active){result.put("healthy",tracker.hasFix());result.put("trip",tracker.tripId());result.put("lastCapturedAt",tracker.lastCapturedAt());try{result.put("fix",tracker.latestFix());}catch(org.json.JSONException ignored){}}
+        if(active){
+            result.put("healthy",tracker.hasFix());result.put("trip",tracker.tripId());result.put("lastCapturedAt",tracker.lastCapturedAt());
+            result.put("locationEnabled",tracker.locationEnabled());
+            try{result.put("fix",tracker.latestFix());}catch(org.json.JSONException ignored){}
+        }else if(!owner.isEmpty()){
+            try(TripTrackerService.Database db=new TripTrackerService.Database(ctx)){
+                org.json.JSONObject saved=TripTrackerService.readCheckpoint(db.getReadableDatabase());
+                if(saved!=null&&owner.equals(saved.optString("owner"))){
+                    result.put("trip",saved.getString("trip"));
+                    result.put("lastCapturedAt",saved.optLong("lastSaved"));
+                }
+            }catch(RuntimeException|org.json.JSONException e){android.util.Log.w("GuayacaGPS","No se pudo leer el estado guardado",e);}
+        }
+        if(active||result.has("trip")){
+            if(!exitChecked){lastExit=recentExit(ctx);exitChecked=true;}
+            result.put("previousExit",lastExit);
+        }
+        android.app.NotificationChannel status=ctx.getSystemService(android.app.NotificationManager.class).getNotificationChannel(TripTrackerService.STATUS_CHANNEL);
+        result.put("statusNotificationEnabled",status==null||status.getImportance()!=android.app.NotificationManager.IMPORTANCE_NONE);
         call.resolve(result);
     }
     @PluginMethod public void openTrackingSettings(PluginCall call){

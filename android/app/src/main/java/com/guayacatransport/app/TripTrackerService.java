@@ -13,6 +13,7 @@ import java.util.UUID;
 
 public final class TripTrackerService extends Service implements LocationListener {
     static final String STATUS_CHANNEL = "guayaca_tracking_status";
+    static final String START_RESULT = "tracking_start_result";
     static volatile TripTrackerService active;
     private LocationManager manager;
     private JSONArray stops;
@@ -57,37 +58,69 @@ public final class TripTrackerService extends Service implements LocationListene
         Intent launch=getPackageManager().getLaunchIntentForPackage(getPackageName());
         Notification.Builder status=new Notification.Builder(this,STATUS_CHANNEL).setSmallIcon(R.drawable.ic_guayaca_notification)
             .setContentTitle("GUAYACA · Seguimiento del viaje")
-            .setContentText(hasSignal?"Recibiendo ubicación del viaje":"Esperando una ubicación precisa")
+            .setContentText(hasSignal?"Recibiendo ubicación del viaje":gpsEnabled()?"Esperando una ubicación precisa":"Ubicación del teléfono desactivada")
             .setOnlyAlertOnce(true).setOngoing(true);
+        if(Build.VERSION.SDK_INT>=31)status.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
         if(launch!=null)status.setContentIntent(PendingIntent.getActivity(this,1,launch,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT));
         return status.build();
     }
+    private boolean gpsEnabled(){
+        LocationManager location=manager==null?getSystemService(LocationManager.class):manager;
+        return location!=null&&location.isProviderEnabled(LocationManager.GPS_PROVIDER);
+    }
+    private static void startResult(ResultReceiver reply,boolean ok,String message){
+        if(reply==null)return;
+        Bundle details=new Bundle();
+        details.putString("message",message);
+        reply.send(ok?1:0,details);
+    }
+    static JSONObject readCheckpoint(SQLiteDatabase db) throws JSONException {
+        try(Cursor c=db.rawQuery("SELECT payload FROM tracking_session WHERE id=1",null)){
+            return c.moveToFirst()?new JSONObject(c.getString(0)):null;
+        }
+    }
     @Override public int onStartCommand(Intent intent,int flags,int startId) {
+        ResultReceiver reply=intent==null?null:intent.getParcelableExtra(START_RESULT);
         try {
             getSystemService(NotificationManager.class).createNotificationChannel(new NotificationChannel(STATUS_CHANNEL,"Seguimiento del viaje",NotificationManager.IMPORTANCE_LOW));
             startForeground(6021,trackingNotification(hasFix()));
-            if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED) throw new SecurityException();
+            if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED)
+                throw new SecurityException("Permite la ubicación precisa para este viaje");
+            String requestedOwner=intent==null?null:intent.getStringExtra("owner");
+            String requestedTrip=intent==null?null:intent.getStringExtra("trip");
+            String localOwner=GuayacaSessionPlugin.storedOwner(this);
+            if(intent!=null&&active==this&&matches(requestedOwner,requestedTrip)&&owner.equals(localOwner)){
+                startResult(reply,true,null);
+                return START_STICKY;
+            }
             if(database==null)database=new Database(this);
             SQLiteDatabase db=database.getWritableDatabase();
-            JSONObject checkpoint=null;
-            try(Cursor c=db.rawQuery("SELECT payload FROM tracking_session WHERE id=1",null)){
-                if(c.moveToFirst())checkpoint=new JSONObject(c.getString(0));
+            JSONObject checkpoint=readCheckpoint(db);
+            long seedAt=intent==null?0:intent.getLongExtra("lastSaved",0);
+            boolean resume=checkpoint!=null&&(intent==null||
+                (checkpoint.optString("owner").equals(requestedOwner)&&checkpoint.optString("trip").equals(requestedTrip)&&
+                 checkpoint.optLong("lastSaved")>=seedAt));
+            if(intent!=null&&intent.getBooleanExtra("resumeOnly",false)&&!resume){
+                startResult(reply,false,"No hay una sesión GPS guardada para este viaje");
+                if(active==this)return START_STICKY;
+                stopSelf();return START_NOT_STICKY;
             }
-            if(intent!=null&&active==this&&matches(intent.getStringExtra("owner"),intent.getStringExtra("trip")))return START_STICKY;
             if(manager!=null)manager.removeUpdates(this);
-            if(intent==null){
-                if(checkpoint==null){stopSelf();return START_NOT_STICKY;}
+            if(resume){
                 owner=checkpoint.getString("owner");trip=checkpoint.getString("trip");stops=checkpoint.getJSONArray("stops");
                 lastSaved=checkpoint.optLong("lastSaved");lastRouteAt=checkpoint.optLong("lastRouteAt");
                 lastRoute=decodeFix(checkpoint.optJSONObject("route"));lastFix=decodeFix(checkpoint.optJSONObject("fix"));
                 candidate=checkpoint.optString("candidate","");candidateAt=checkpoint.optLong("candidateAt");candidatePosition=checkpoint.optInt("candidatePosition",-1);
-            }else{
-                owner=intent.getStringExtra("owner");trip=intent.getStringExtra("trip");stops=new JSONArray(intent.getStringExtra("stops"));
-                lastSaved=intent.getLongExtra("lastSaved",0);lastRouteAt=intent.getLongExtra("lastRouteAt",0);
+            }else if(intent!=null){
+                owner=requestedOwner;trip=requestedTrip;stops=new JSONArray(intent.getStringExtra("stops"));
+                lastSaved=seedAt;lastRouteAt=intent.getLongExtra("lastRouteAt",0);
                 String seed=intent.getStringExtra("route");lastRoute=seed==null?null:decodeFix(new JSONObject(seed));lastFix=lastRoute;
                 candidate="";candidatePosition=-1;candidateAt=0;
+            }else{stopSelf();return START_NOT_STICKY;}
+            if(owner==null||!owner.equals(localOwner)||firstPending()==null){
+                startResult(reply,false,"No hay un recorrido activo para esta cuenta");
+                clearAndStop();return START_NOT_STICKY;
             }
-            if(!owner.equals(GuayacaSessionPlugin.storedOwner(this))||firstPending()==null){clearAndStop();return START_NOT_STICKY;}
             healthy=false;saveCheckpoint(db);
             manager=getSystemService(LocationManager.class);
             manager.requestLocationUpdates(LocationManager.GPS_PROVIDER,5000L,0f,this,Looper.getMainLooper());
@@ -98,10 +131,15 @@ public final class TripTrackerService extends Service implements LocationListene
             active=this;
             handler.removeCallbacks(updateStatus);
             handler.post(updateStatus);
-            android.util.Log.i("GuayacaGPS",intent==null?"Seguimiento restaurado por Android":"Servicio de seguimiento iniciado");
+            android.util.Log.i("GuayacaGPS",resume?"Seguimiento restaurado desde el dispositivo":"Servicio de seguimiento iniciado");
             if(!MainActivity.visible)TrackingSyncJob.schedule(this);
+            startResult(reply,true,null);
             return START_STICKY;
-        } catch (Exception e) { android.util.Log.w("GuayacaGPS","No se pudo iniciar seguimiento",e);stopSelf();return START_NOT_STICKY; }
+        } catch (Exception e) {
+            android.util.Log.w("GuayacaGPS","No se pudo iniciar seguimiento",e);
+            startResult(reply,false,e instanceof SecurityException?"Abre el viaje y permite la ubicación precisa":"No se pudo iniciar el servicio GPS. Revisa la ubicación del teléfono.");
+            stopSelf();return START_NOT_STICKY;
+        }
     }
     private Location decodeFix(JSONObject json) throws JSONException {
         if(json==null)return null;
@@ -135,7 +173,8 @@ public final class TripTrackerService extends Service implements LocationListene
     private boolean incident(JSONObject s){String v=s.optString("outcome");return "partial".equals(v)||"rejected".equals(v)||"failed".equals(v);}
     private JSONObject firstPending(){for(int i=0;i<stops.length();i++){JSONObject s=stops.optJSONObject(i);if(s!=null&&!has(s,"departed_at"))return s;}return null;}
     boolean matches(String user,String id){return owner!=null&&owner.equals(user)&&trip!=null&&trip.equals(id);}
-    boolean hasFix(){return healthy&&lastFix!=null&&System.currentTimeMillis()-lastFix.getTime()<=FIX_FRESH_MS;}
+    boolean hasFix(){return healthy&&lastFix!=null&&SystemClock.elapsedRealtimeNanos()-lastFix.getElapsedRealtimeNanos()<=FIX_FRESH_MS*1000000L;}
+    boolean locationEnabled(){return gpsEnabled();}
     String tripId(){return trip;}
     boolean ownedBy(String user){return owner!=null&&owner.equals(user);}
     JSONObject latestFix() throws JSONException {return encodeFix(lastFix);}
@@ -166,7 +205,9 @@ public final class TripTrackerService extends Service implements LocationListene
         // Prefer fresh satellite readings; use the system network provider as a backup.
         if(!LocationManager.GPS_PROVIDER.equals(fix.getProvider())&&lastFix!=null&&
             LocationManager.GPS_PROVIDER.equals(lastFix.getProvider())&&at-lastFix.getTime()<15000L)return;
+        boolean firstFreshFix=!hasFix();
         healthy=true;lastFix=new Location(fix);
+        if(firstFreshFix){handler.removeCallbacks(updateStatus);handler.post(updateStatus);}
         JSONObject s=null, active=null;
         String kind="";
         double nearest=Double.POSITIVE_INFINITY;
@@ -227,6 +268,9 @@ public final class TripTrackerService extends Service implements LocationListene
                         String missing=(!hasGuide(s)&&!hasKm(s))?"guía y kilometraje":!hasGuide(s)?"guía":"kilometraje";
                         alertPlace=p;alertTitle="Completa el punto del viaje";
                         alertMessage=p.optString("name","Punto del viaje")+" · Falta "+missing;
+                    }else{
+                        alertPlace=p;alertTitle="Saliste del punto del viaje";
+                        alertMessage=p.optString("name","Punto del viaje");
                     }
                 }
                 candidate="";

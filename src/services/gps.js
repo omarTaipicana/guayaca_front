@@ -20,11 +20,13 @@ export function stopGps(){
 export async function readNativeGps(){
  if(!nativeLocation||polling)return;
  polling=true;try{
-  await importNativeGps();
-  const s=await Device.trackingStatus({owner:ownerId()});
-  if(s.active&&!trip)trip=String(s.trip);
-  const matches=s.active&&String(s.trip)===String(trip);
-  if(trip)emit(matches?(s.healthy?'Seguimiento activo':'Esperando ubicación precisa'):'Seguimiento detenido',{active:matches,healthy:matches&&!!s.healthy,fix:matches?s.fix||null:null,lastCapturedAt:matches?s.lastCapturedAt||null:null,batteryOptimized:s.batteryOptimized,notificationsEnabled:s.notificationsEnabled});
+  const owner=ownerId(),token=generation;
+  const s=await Device.trackingStatus({owner});
+  if(token!==generation||owner!==ownerId())return;
+  if(s.trip&&!trip)trip=String(s.trip);
+  const sameTrip=!!s.trip&&String(s.trip)===String(trip),running=s.active&&sameTrip;
+  const message=!running?'Seguimiento detenido':s.healthy?'Seguimiento activo':s.locationEnabled===false?'Ubicación del teléfono desactivada':'Esperando ubicación precisa';
+  if(trip)emit(message,{active:running,healthy:running&&!!s.healthy,fix:running?s.fix||null:null,lastCapturedAt:sameTrip?s.lastCapturedAt||null:null,batteryOptimized:s.batteryOptimized,notificationsEnabled:s.notificationsEnabled,statusNotificationEnabled:s.statusNotificationEnabled,previousExit:s.previousExit});
   syncNow().catch(()=>{});
  }finally{polling=false;}
 }
@@ -33,18 +35,37 @@ export async function startGps(id){
  if(!nativeLocation&&!navigator.geolocation)throw Error('El dispositivo no permite geolocalización');
  const owner=ownerId(),token=++generation;
  if(watch!==null)clearPositionWatch(watch);watch=null;trip=String(id);
- if(nativeLocation)await importNativeGps(owner);
- const snapshot=await projectedTrip(id);
+ let nativeCheckpoint=null;
+ if(nativeLocation){
+  const s=await Device.trackingStatus({owner});
+  if(token!==generation||owner!==ownerId())return;
+  if(s.active&&String(s.trip)===String(id)){await readNativeGps();return;}
+  if(!s.active&&String(s.trip)===String(id))nativeCheckpoint=s;
+  // Failure to copy old points to the web queue must not block local capture.
+  await importNativeGps(owner).catch(()=>{});
+ }
+ const snapshot=await projectedTrip(id).catch(e=>{if(nativeCheckpoint)return null;throw e;});
  if(token!==generation||owner!==ownerId())return;
  if(snapshot?.route_complete||['finalizado','cancelado'].includes(snapshot?.status)){emit('Recorrido terminado',{active:false,healthy:false,fix:null});return;}
- if(!snapshot?.stops?.length){emit('Abre el viaje con conexión para preparar sus puntos.',{active:false,healthy:false,fix:null});return;}
- lastRoute=snapshot.samples?.at(-1)||null;lastSaved=+new Date(snapshot.last_observed_at||lastRoute?.device_at||0);
+ if(!snapshot?.stops?.length&&!nativeCheckpoint){emit('Abre el viaje con conexión para preparar sus puntos.',{active:false,healthy:false,fix:null});return;}
+ lastRoute=snapshot?.samples?.at(-1)||null;
+ lastSaved=+new Date(snapshot?.last_observed_at||lastRoute?.device_at||0)||0;
  if(nativeLocation){
-  await Device.configureChannel({owner,...await alertSettings(owner)});
+  // Android can register locations even when notification preferences are unavailable.
+  await alertSettings(owner).then(settings=>Device.configureChannel({owner,...settings})).catch(()=>{});
   if(token!==generation||owner!==ownerId())return;
-  await Device.startTracking({owner,apiUrl:API,trip:String(id),stops:snapshot.stops,lastSaved,lastRouteAt:+new Date(lastRoute?.device_at||0),...(lastRoute?{route:lastRoute}:{})});
-  if(token!==generation||owner!==ownerId())return;
-  emit('Buscando señal GPS',{active:true,permission:'granted',healthy:false,fix:null,lastCapturedAt:null});return;
+  try{
+   const resumeOnly=!snapshot?.stops?.length;
+   await Device.startTracking({owner,apiUrl:API,trip:String(id),resumeOnly,stops:snapshot?.stops,lastSaved,lastRouteAt:+new Date(lastRoute?.device_at||0),...(lastRoute?{route:{...lastRoute,timestamp:+new Date(lastRoute.device_at||0)}}:{})});
+   if(token!==generation||owner!==ownerId())return;
+   emit('Buscando señal GPS',{active:true,permission:'granted',healthy:false,fix:null,lastCapturedAt:Math.max(lastSaved,nativeCheckpoint?.lastCapturedAt||0)||null});
+   await readNativeGps().catch(()=>{});
+  }catch(e){
+   if(token!==generation||owner!==ownerId())return;
+   emit(e.message,{active:false,healthy:false,fix:null});
+   throw e;
+  }
+  return;
  }
  emit('Buscando señal GPS',{active:true,healthy:false});
  watch=watchPosition(async fix=>{

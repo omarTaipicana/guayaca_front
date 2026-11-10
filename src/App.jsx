@@ -109,10 +109,11 @@ export default function App() {
     const owner=ownerId(),bearer=getBearer();
     if(!bearer||checkingSession.current)return;
     checkingSession.current=true;
+    let localSessionOpened=false;
     try{
       const local=android?(await cached('/me').catch(()=>null))?.data:null;
       const usable=local&&local.role!=='admin'&&String(local.id)===owner&&local.permissions?.includes('viajes');
-      if(usable&&getBearer()===bearer){openSession(local);setRestorePending(false);await resumeTrip(local,owner).catch(()=>{});}
+      if(usable&&getBearer()===bearer){localSessionOpened=true;openSession(local);setRestorePending(false);await resumeTrip(local,owner).catch(()=>{});}
       if(!usable||navigator.onLine!==false){
         const u=await sessionRequest('/me',{},8000,true);
         if(getBearer()!==bearer)return;
@@ -122,7 +123,7 @@ export default function App() {
     }catch(e){
       if(getBearer()!==bearer)return;
       if(!android||[401,403].includes(e.status))await clearSession(android?'Tu sesión ya no está autorizada. Vuelve a ingresar.':'');
-      else setRestorePending(true);
+      else setRestorePending(!localSessionOpened);
     }finally{checkingSession.current=false;}
   }
   useEffect(()=>{restoreSession();},[]);
