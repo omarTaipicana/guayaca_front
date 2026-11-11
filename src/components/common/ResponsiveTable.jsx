@@ -1,4 +1,4 @@
-import {Children,Fragment,useSyncExternalStore} from 'react';
+import {Children,Fragment,isValidElement,useSyncExternalStore} from 'react';
 import './styles/ResponsiveTable.css';
 
 const query='(max-width: 767px)';
@@ -9,13 +9,13 @@ const subscribe=fn=>{
  return ()=>media.removeEventListener('change',fn);
 };
 function flatten(nodes,prefix=''){
- return Children.toArray(nodes).flatMap((node,index)=>{
+ return Children.toArray(nodes).filter(isValidElement).flatMap((node,index)=>{
   const key=prefix+'/'+(node.key??index);
   return node.type===Fragment?flatten(node.props.children,key):[{node,key}];
  });
 }
-const parts=node=>Children.toArray(node?.props.children);
-const label=cell=>cell?.props['data-mobile-label']??cell?.props.children;
+const parts=node=>Children.toArray(node?.props?.children).filter(isValidElement);
+const label=cell=>cell?.props?.['data-mobile-label']??cell?.props?.children;
 
 export default function ResponsiveTable({children,primary=[0,1],selection,headerActions=false,...props}){
  const mobile=useSyncExternalStore(subscribe,snapshot,()=>false);

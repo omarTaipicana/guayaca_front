@@ -1,9 +1,10 @@
+import OdometerHint from './OdometerHint.jsx';
 import {useState} from 'react';
 import CatalogModal from './CatalogModal.jsx';
 import DocumentInput from '../common/DocumentInput.jsx';
 import {api} from '../../services/api.js';
 
-export default function RouteExpense({trip,onClose,onSaved}){
+export default function RouteExpense({trip,odometer,onClose,onSaved}){
  const [type,Type]=useState('combustible'),[busy,Busy]=useState(false),[error,ErrorText]=useState('');
  async function save(e){
   e.preventDefault();const body=new FormData(e.currentTarget);Busy(true);ErrorText('');
@@ -24,7 +25,7 @@ export default function RouteExpense({trip,onClose,onSaved}){
    </fieldset>
    <div className="route-panel-card route-panel-form">
     <label>Valor (USD)<input name="amount" type="number" min="0" step="0.01" inputMode="decimal" placeholder="0.00" required/></label>
-    {type==='combustible'&&<label>Kilometraje al cargar combustible<input name="odometer" type="number" min="0" max="99999999999" step="0.1" inputMode="decimal" required/></label>}
+    {type==='combustible'&&<label>Kilometraje al cargar combustible<OdometerHint value={odometer}/><input name="odometer" type="number" min="0" max="99999999999" step="0.1" inputMode="decimal" required/></label>}
     <label>Detalle <small>Opcional</small><input name="notes" placeholder="Estación, garita u observación"/></label>
    </div>
    <div className="route-panel-card">

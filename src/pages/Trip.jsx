@@ -1,3 +1,4 @@
+import OdometerHint,{lastOdometer} from '../components/catalog/OdometerHint.jsx';
 import {getPosition,authorizeLocation} from '../services/native/location.js';
 import TripControl from '../components/catalog/TripControl.jsx';
 import DocumentInput from '../components/common/DocumentInput.jsx';
@@ -26,10 +27,11 @@ export default function Trip({ detail, refresh, back, run, admin,currentUser,not
     events.length > 1
       ? Number(events.at(-1).odometer) - Number(events[0].odometer)
       : 0;
+  const odometer=lastOdometer(detail.vehicle_odometer,...events.map(e=>e.odometer),...expenses.map(e=>e.odometer));
   const georeferenced=!!(t.metadata?.origin_place&&t.metadata?.destination_places?.length);
   if(georeferenced&&!admin)return <>
    <div className="route-title"><h1>Viaje {t.code}</h1><button className="secondary" type="button" onClick={back}>Volver</button></div>
-   <GpsTrip trip={t} user={currentUser} onUpdated={refresh} noticeTarget={noticeTarget} onNoticeFocused={onNoticeFocused}/>
+   <GpsTrip trip={t} baseOdometer={odometer} user={currentUser} onUpdated={refresh} noticeTarget={noticeTarget} onNoticeFocused={onNoticeFocused}/>
   </>;
   return (
     <>
@@ -37,7 +39,7 @@ export default function Trip({ detail, refresh, back, run, admin,currentUser,not
         ← Volver a viajes
       </button>
       <h1>{t.code} · {t.is_test?'PRUEBA':'REAL'}</h1>{admin&&t.is_test&&<p className="catalog-info">Viaje de prueba: no se incluirá en resultados ni cortes de cobro y no modifica el kilometraje real.</p>}{t.is_test&&admin&&<SimulationControls trip={t} onUpdated={refresh}/>}{t.metadata?.capacity_warning&&<p className="catalog-info">{t.metadata.capacity_warning}</p>}{admin&&Number(t.standby_amount)>0&&<p className="catalog-info">Tarifa base: ${money(t.base_amount)} · Stand by: ${money(t.standby_amount)} · Total: ${money(t.amount)}</p>}
-      {t.metadata?.origin_place&&t.metadata?.destination_places?.length>0&&<GpsTrip trip={t} user={currentUser} onUpdated={refresh} noticeTarget={noticeTarget} onNoticeFocused={onNoticeFocused}/>}
+      {t.metadata?.origin_place&&t.metadata?.destination_places?.length>0&&<GpsTrip trip={t} baseOdometer={odometer} user={currentUser} onUpdated={refresh} noticeTarget={noticeTarget} onNoticeFocused={onNoticeFocused}/>}
       {(georeferenced||admin)&&<><TripControl trip={t} admin={admin} onUpdated={refresh}/>{admin&&georeferenced&&<><p>Tarifa de referencia al crear: {t.metadata.priced_destination?.name||t.metadata.farthest?.name} · ${money(t.metadata.amount)} · {t.tonnage} t</p><p>Flete vigente: ${money(t.base_amount)} · Stand by registrado: ${money(t.standby_amount)}. Los cargos pendientes requieren revisión antes del cobro.</p><ul>{t.metadata.destination_places.map((p,i)=><li key={p.id}>{p.name}</li>)}</ul></>}</>}
       {admin&&t.metadata&&<details><summary>Datos conservados al crear el viaje</summary>{t.metadata.client&&<p>Cliente histórico: {t.metadata.client?.name||t.metadata.client}</p>}{t.metadata.client?.document_number&&<p>Cédula/RUC: {t.metadata.client.document_number}</p>}<p>Origen: {t.metadata.origin_place?.name||t.metadata.origin||'—'}</p><p>Destinos: {t.metadata.destination_places?.map(p=>p.name).join(' → ')||t.metadata.destination||'—'}</p><p>Categoría: {t.metadata.category?.name||'Sin categoría registrada'} · Valor guardado: ${money(t.metadata.amount??t.amount)}</p>{t.metadata.rates?.map((r,i)=><p key={i}>Tarifa registrada: ${money(r.amount)} · {r.active?'Activa':'Inactiva'}</p>)}<small>{t.metadata.legacy?'Viaje anterior: se conservaron los textos existentes.':'Estos datos no cambian al editar o eliminar lugares o tarifas.'}</small></details>}
       <p>
@@ -121,6 +123,7 @@ export default function Trip({ detail, refresh, back, run, admin,currentUser,not
             {['farthest_road_destination','highest_destination_rate'].includes(t.metadata?.calculation)&&['llegada_destino','entrega'].includes(eventType)&&<label>Destino<select name="destination_index" required defaultValue=""><option value="">Selecciona</option>{t.metadata.destination_places.map((p,i)=><option key={p.id} value={i} disabled={eventType==='entrega'&&deliveries.some(d=>d.position===i)}>{p.name}</option>)}</select></label>}
             <label>
               Kilometraje del tablero
+              <OdometerHint value={odometer}/>
               <input
                 name="odometer"
                 type="number"
@@ -161,7 +164,7 @@ export default function Trip({ detail, refresh, back, run, admin,currentUser,not
               <option value="peaje">Peaje</option>
             </select>
           </label>
-          {expenseType==='combustible'&&<label>Kilometraje al cargar combustible<input name="odometer" type="number" min="0" max="99999999999" step="0.1" required/></label>}
+          {expenseType==='combustible'&&<label>Kilometraje al cargar combustible<OdometerHint value={odometer}/><input name="odometer" type="number" min="0" max="99999999999" step="0.1" required/></label>}
           <label>
             Valor USD
             <input name="amount" type="number" min="0" step="0.01" required />

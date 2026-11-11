@@ -1,3 +1,4 @@
+import OdometerHint,{lastOdometer} from './OdometerHint.jsx';
 import {nativeLocation} from '../../services/native/location.js';
 import {Device} from '../../services/native/device.js';
 import TripPreparation from './TripPreparation.jsx';
@@ -15,7 +16,7 @@ import RouteExpense from './RouteExpense.jsx';
 import RouteIncident,{incidentLabels} from './RouteIncident.jsx';
 import './styles/Gps.css';
 const maps=p=>'https://www.google.com/maps/dir/?'+new URLSearchParams({api:'1',destination:p.latitude+','+p.longitude,travelmode:'driving',dir_action:'navigate'});
-export default function GpsTrip({trip,user,onUpdated,noticeTarget,onNoticeFocused}){
+export default function GpsTrip({trip,baseOdometer,user,onUpdated,noticeTarget,onNoticeFocused}){
  const [offline,Offline]=useState(navigator.onLine===false),[pending,Pending]=useState([]),[data,D]=useState({stops:[],samples:[]}),[tracking,T]=useState(gpsStatus()),[error,E]=useState(''),[busy,B]=useState(false);
  const [panel,Panel]=useState(null),[position,Position]=useState(0),[saved,Saved]=useState('');
  const pointRefs=useRef(new Map());
@@ -43,6 +44,7 @@ export default function GpsTrip({trip,user,onUpdated,noticeTarget,onNoticeFocuse
  }
  async function run(fn){B(true);E('');try{const result=await fn();if(!result?.queued){await load();await onUpdated();}window.dispatchEvent(new Event('guayaca:trips-changed'))}catch(e){E(e.message)}finally{B(false)}}
  useEffect(()=>{let active=true;const update=()=>pendingOperations().then(async rows=>{if(active){Pending(rows.filter(o=>String(o.trip_id)===String(trip.id)));const state=await projectedTrip(trip.id);if(active&&state)D(state);}}).catch(()=>{}),local=()=>Offline(true),online=()=>Offline(navigator.onLine===false);update();window.addEventListener('guayaca:outbox',update);window.addEventListener('guayaca:offline-cache',local);window.addEventListener('offline',local);window.addEventListener('online',online);return()=>{active=false;window.removeEventListener('guayaca:outbox',update);window.removeEventListener('guayaca:offline-cache',local);window.removeEventListener('offline',local);window.removeEventListener('online',online)}},[trip.id]);
+ const odometer=lastOdometer(baseOdometer,...data.stops.flatMap(s=>[s.arrival_odometer,s.departure_odometer]),...pending.filter(o=>o.kind==='point'||o.kind==='expense').map(o=>o.body?.odometer));
  const visibleStops=data.stops.length?data.stops:points.map((place,position)=>({id:'local-'+position,place,position}));
  useEffect(()=>{
   if(!noticeTarget||String(noticeTarget.trip_id)!==String(trip.id))return;
@@ -70,7 +72,7 @@ export default function GpsTrip({trip,user,onUpdated,noticeTarget,onNoticeFocuse
  {s.outside_at&&!s.departed_at&&<p className="catalog-info">Salida física: {date(s.outside_at)} · {s.exit_state==='waiting'?user.role==='admin'?'Sigue esperando fuera del lugar. El stand by puede continuar.':'Sigue esperando fuera del lugar.':s.exit_state==='review'?'Novedad pendiente de revisión.':'Confirma qué ocurrió en esta entrega.'} {s.exit_reason}</p>}
  {(s.arrived_at||offline||!admin&&!closed)&&<div className="gps-requirement">{localPending&&<p className="catalog-info">Datos guardados en este dispositivo. Pendiente de confirmación del servidor; revisa Sincronización.</p>}{!s.arrived_at&&(offline||!admin)&&<p>La llegada todavía no está confirmada. Puedes guardar los datos; el servidor validará la llegada con las coordenadas al sincronizar.</p>}<strong>{admin?(done?'Punto documentado · '+s.arrival_odometer+' km':localPending?'Guía y kilometraje guardados':s.outside_at?'Completa los datos pendientes':'Puedes adjuntar la guía antes de salir'):docsLabel}</strong>
  {!done&&!localPending&&canEdit&&!closed&&<details className="gps-documents" open={!admin||!!s.outside_at||undefined}><summary>{s.position===0?'Adjuntar guía':'Adjuntar guía de entrega'}</summary><form onSubmit={e=>{e.preventDefault();const body=new FormData(e.currentTarget);body.set('phase','arrival');run(()=>api(`/trips/${trip.id}/stops/${s.id}/complete`,{method:'POST',body,position:s.position}))}}>
- <label>Kilometraje del punto<input name="odometer" required type="number" min="0" step="0.1"/></label><label>{s.position===0?'Guía principal de embarque':['partial','rejected','failed'].includes(s.outcome)?'Documento de soporte de la incidencia':'Documento de entrega (confirma recepción)'}<DocumentInput name="file" required multiple/></label><button disabled={busy}>{busy?'Guardando todas las hojas…':'Guardar guía y kilometraje'}</button></form></details>}
+ <label>Kilometraje del punto<OdometerHint value={odometer}/><input name="odometer" required type="number" min="0" step="0.1"/></label><label>{s.position===0?'Guía principal de embarque':['partial','rejected','failed'].includes(s.outcome)?'Documento de soporte de la incidencia':'Documento de entrega (confirma recepción)'}<DocumentInput name="file" required multiple/></label><button disabled={busy}>{busy?'Guardando todas las hojas…':'Guardar guía y kilometraje'}</button></form></details>}
  {!!(s.arrival_file_ids?.length||s.arrival_file_id)&&<p>Adjuntos: {s.arrival_file_ids?.length||1}. {localPending?'Pendientes de confirmación.':(s.arrival_file_ids?.length?s.arrival_file_ids:[s.arrival_file_id]).map((id,i)=><button type="button" className="link" key={id} disabled={String(id).startsWith('pending-')} onClick={()=>run(()=>download(id,s.document_files?.find(f=>String(f.id)===String(id))?.original_name||('guia-'+s.position+'-hoja-'+(i+1))))}>Descargar archivo {i+1}</button>)}</p>}{s.document_waived&&<p>Documento eximido por el administrador con motivo e historial.</p>}</div>}
  {(exitOp||feedback)&&<p className={failedExit||feedback?.error?'catalog-error':'catalog-info'} role={failedExit||feedback?.error?'alert':'status'}>{failedExit?'No se pudo enviar la respuesta: '+exitOp.error:exitOp?'Respuesta guardada. Se enviará automáticamente.':feedback?.id&&['waiting','review','incident','delivered'].includes(s.exit_state)&&!s.local_pending?'Situación registrada.':feedback?.text}</p>}
  {s.position>0&&s.outside_at&&!s.departed_at&&canEdit&&!closed&&!exitOp&&<form className="gps-exit-form" onSubmit={e=>submitExit(e,s)}>
@@ -110,6 +112,6 @@ export default function GpsTrip({trip,user,onUpdated,noticeTarget,onNoticeFocuse
    {error&&<p className="catalog-error" role="alert">{error}</p>}
    {cards(visibleStops.filter(s=>s.position===position))}
   </CatalogModal>}
-  {panel==='expenses'&&<RouteExpense trip={trip} onClose={()=>Panel(null)} onSaved={message=>{Saved(message);Panel(null);}}/>}
+  {panel==='expenses'&&<RouteExpense trip={trip} odometer={odometer} onClose={()=>Panel(null)} onSaved={message=>{Saved(message);Panel(null);onUpdated()?.catch?.(()=>{});}}/>}
  </section>;
 }
