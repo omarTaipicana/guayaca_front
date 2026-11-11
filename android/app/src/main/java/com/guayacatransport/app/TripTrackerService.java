@@ -18,15 +18,16 @@ public final class TripTrackerService extends Service implements LocationListene
     private LocationManager manager;
     private JSONArray stops;
     private String owner, trip;
-    private long lastSaved, lastRouteAt, candidateAt, lastNetworkCheck;
+    private long lastSaved, candidateAt, lastNetworkCheck;
     private int candidatePosition = -1;
     private String candidate = "";
     private Location lastRoute;
+    private final RouteMotionFilter motion=new RouteMotionFilter();
     private Location lastFix;
     private boolean healthy;
     private Database database;
     private final Handler handler=new Handler(Looper.getMainLooper());
-    private static final long FIX_FRESH_MS=30000L, ROUTE_HEARTBEAT_MS=60000L;
+    private static final long FIX_FRESH_MS=30000L, POSITION_HEARTBEAT_MS=60000L;
     private final Runnable updateStatus=new Runnable(){
         @Override public void run(){
             if(active!=TripTrackerService.this)return;
@@ -38,7 +39,7 @@ public final class TripTrackerService extends Service implements LocationListene
     };
 
     static final class Database extends SQLiteOpenHelper {
-        Database(Context context) { super(context.getApplicationContext(), "guayaca_tracking.db", null, 2); }
+        Database(Context context) { super(context.getApplicationContext(), "guayaca_tracking.db", null, 2); setWriteAheadLoggingEnabled(true); }
         @Override public void onCreate(SQLiteDatabase db) {
             db.execSQL("CREATE TABLE points (id TEXT PRIMARY KEY, owner TEXT NOT NULL, trip TEXT NOT NULL, captured INTEGER NOT NULL, lat REAL NOT NULL, lng REAL NOT NULL, accuracy REAL NOT NULL, route INTEGER NOT NULL, synced INTEGER NOT NULL DEFAULT 0)");
             db.execSQL("CREATE INDEX tracking_owner_time ON points(owner,captured)");
@@ -86,6 +87,10 @@ public final class TripTrackerService extends Service implements LocationListene
             startForeground(6021,trackingNotification(hasFix()));
             if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED)
                 throw new SecurityException("Permite la ubicación precisa para este viaje");
+            if(intent!=null){
+                try{TrackingSyncJob.configure(this,intent.getStringExtra("apiUrl"));}
+                catch(IllegalArgumentException e){android.util.Log.w("GuayacaGPS","Sin API válida para sincronización nativa");}
+            }
             String requestedOwner=intent==null?null:intent.getStringExtra("owner");
             String requestedTrip=intent==null?null:intent.getStringExtra("trip");
             String localOwner=GuayacaSessionPlugin.storedOwner(this);
@@ -108,12 +113,12 @@ public final class TripTrackerService extends Service implements LocationListene
             if(manager!=null)manager.removeUpdates(this);
             if(resume){
                 owner=checkpoint.getString("owner");trip=checkpoint.getString("trip");stops=checkpoint.getJSONArray("stops");
-                lastSaved=checkpoint.optLong("lastSaved");lastRouteAt=checkpoint.optLong("lastRouteAt");
+                lastSaved=checkpoint.optLong("lastSaved");
                 lastRoute=decodeFix(checkpoint.optJSONObject("route"));lastFix=decodeFix(checkpoint.optJSONObject("fix"));
                 candidate=checkpoint.optString("candidate","");candidateAt=checkpoint.optLong("candidateAt");candidatePosition=checkpoint.optInt("candidatePosition",-1);
             }else if(intent!=null){
                 owner=requestedOwner;trip=requestedTrip;stops=new JSONArray(intent.getStringExtra("stops"));
-                lastSaved=seedAt;lastRouteAt=intent.getLongExtra("lastRouteAt",0);
+                lastSaved=seedAt;
                 String seed=intent.getStringExtra("route");lastRoute=seed==null?null:decodeFix(new JSONObject(seed));lastFix=lastRoute;
                 candidate="";candidatePosition=-1;candidateAt=0;
             }else{stopSelf();return START_NOT_STICKY;}
@@ -121,6 +126,7 @@ public final class TripTrackerService extends Service implements LocationListene
                 startResult(reply,false,"No hay un recorrido activo para esta cuenta");
                 clearAndStop();return START_NOT_STICKY;
             }
+            motion.reset(lastRoute==null?null:motionPoint(lastRoute));
             healthy=false;saveCheckpoint(db);
             manager=getSystemService(LocationManager.class);
             manager.requestLocationUpdates(LocationManager.GPS_PROVIDER,5000L,0f,this,Looper.getMainLooper());
@@ -132,7 +138,7 @@ public final class TripTrackerService extends Service implements LocationListene
             handler.removeCallbacks(updateStatus);
             handler.post(updateStatus);
             android.util.Log.i("GuayacaGPS",resume?"Seguimiento restaurado desde el dispositivo":"Servicio de seguimiento iniciado");
-            if(!MainActivity.visible)TrackingSyncJob.schedule(this);
+            if(!TrackingControlProvider.uiVisible)TrackingSyncJob.schedule(this);
             startResult(reply,true,null);
             return START_STICKY;
         } catch (Exception e) {
@@ -153,7 +159,7 @@ public final class TripTrackerService extends Service implements LocationListene
     }
     private void saveCheckpoint(SQLiteDatabase db) throws JSONException {
         JSONObject state=new JSONObject().put("owner",owner).put("trip",trip).put("stops",stops)
-            .put("lastSaved",lastSaved).put("lastRouteAt",lastRouteAt).put("route",encodeFix(lastRoute))
+            .put("lastSaved",lastSaved).put("route",encodeFix(lastRoute))
             .put("fix",encodeFix(lastFix)).put("candidate",candidate).put("candidateAt",candidateAt).put("candidatePosition",candidatePosition);
         ContentValues values=new ContentValues();values.put("id",1);values.put("payload",state.toString());
         db.replaceOrThrow("tracking_session",null,values);
@@ -164,6 +170,7 @@ public final class TripTrackerService extends Service implements LocationListene
     private void clearAndStop(){try{if(database!=null)database.getWritableDatabase().delete("tracking_session",null,null);}finally{stopSelf();}}
     @Override public void onTaskRemoved(Intent rootIntent){
         super.onTaskRemoved(rootIntent);
+        TrackingControlProvider.uiVisible=false;
         android.util.Log.i("GuayacaGPS","Tarea retirada de Recientes; continúa el servicio de ubicación");
         TrackingSyncJob.schedule(this);
     }
@@ -179,6 +186,7 @@ public final class TripTrackerService extends Service implements LocationListene
     boolean ownedBy(String user){return owner!=null&&owner.equals(user);}
     JSONObject latestFix() throws JSONException {return encodeFix(lastFix);}
     long lastCapturedAt(){return lastSaved;}
+    void endTracking(){clearAndStop();}
     void stopFor(String user,String id){if(matches(user,id))clearAndStop();}
 
     void applyAction(int pos,String kind,JSONObject body) throws JSONException {
@@ -195,6 +203,10 @@ public final class TripTrackerService extends Service implements LocationListene
         if(firstPending()==null)clearAndStop();else saveCheckpoint(database.getWritableDatabase());
     }
 
+    private static RouteMotionFilter.Point motionPoint(Location f){
+        return new RouteMotionFilter.Point(f.getLatitude(),f.getLongitude(),f.getAccuracy(),f.getTime(),
+            f.hasSpeed()?f.getSpeed():-1,f.hasSpeedAccuracy()?f.getSpeedAccuracyMetersPerSecond():-1);
+    }
     @Override public void onLocationChanged(Location fix) {
         if(stops==null||!fix.hasAccuracy())return;
         long at=fix.getTime(),now=System.currentTimeMillis();
@@ -233,13 +245,13 @@ public final class TripTrackerService extends Service implements LocationListene
         }
         JSONObject p=s==null?null:s.optJSONObject("place");
         int pos=s==null?-1:s.optInt("position");
-        boolean route=lastRoute==null||at-lastRouteAt>=ROUTE_HEARTBEAT_MS||
-            (at-lastRouteAt>=8000&&fix.distanceTo(lastRoute)>=Math.max(30,acc+lastRoute.getAccuracy()));
+        boolean route=LocationManager.GPS_PROVIDER.equals(fix.getProvider())&&motion.accept(motionPoint(fix));
+        boolean heartbeat=at-lastSaved>=POSITION_HEARTBEAT_MS;
         boolean start=!kind.isEmpty()&&(!kind.equals(candidate)||pos!=candidatePosition||at-lastSaved>90000);
         boolean confirm=!kind.isEmpty()&&!start&&at-candidateAt>=20000;
         boolean reset=kind.isEmpty()&&!candidate.isEmpty();
-        if(!route&&!start&&!confirm&&!reset){
-            if(!MainActivity.visible&&at-lastNetworkCheck>=60000){lastNetworkCheck=at;TrackingSyncJob.schedule(this);}
+        if(!route&&!heartbeat&&!start&&!confirm&&!reset){
+            if(!TrackingControlProvider.uiVisible&&at-lastNetworkCheck>=60000){lastNetworkCheck=at;TrackingSyncJob.schedule(this);}
             return;
         }
         JSONObject alertPlace=null;String alertMessage=null,alertTitle=null;
@@ -250,7 +262,7 @@ public final class TripTrackerService extends Service implements LocationListene
             ContentValues values=new ContentValues();values.put("id",UUID.randomUUID().toString());values.put("owner",owner);values.put("trip",trip);
             values.put("captured",at);values.put("lat",fix.getLatitude());values.put("lng",fix.getLongitude());values.put("accuracy",acc);values.put("route",route?1:0);
             db.insertOrThrow("points",null,values);
-            lastSaved=at;if(route){lastRoute=new Location(fix);lastRouteAt=at;}
+            lastSaved=at;if(route)lastRoute=new Location(fix);
             if(start){candidate=kind;candidateAt=at;candidatePosition=pos;}
             else if(confirm){
                 String captured=java.time.Instant.ofEpochMilli(candidateAt).toString();
@@ -279,7 +291,7 @@ public final class TripTrackerService extends Service implements LocationListene
             if(complete)db.delete("tracking_session",null,null);else saveCheckpoint(db);
             db.setTransactionSuccessful();
             }finally{db.endTransaction();}
-            if(!MainActivity.visible||firstPending()==null){lastNetworkCheck=at;TrackingSyncJob.schedule(this);}
+            if(!TrackingControlProvider.uiVisible||firstPending()==null){lastNetworkCheck=at;TrackingSyncJob.schedule(this);}
             if(alertPlace!=null){
                 try{NativeAlerts.post(this,owner,alertTitle,alertMessage,(owner+":"+trip+":"+pos+":"+kind).hashCode(),trip,null,pos);}
                 catch(RuntimeException e){android.util.Log.w("GuayacaGPS","No se pudo mostrar la alerta local; GPS continúa",e);}

@@ -3,8 +3,8 @@ import android.os.Bundle;
 import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     static volatile boolean visible;
-    @Override public void onStart(){super.onStart();visible=true;}
-    @Override public void onStop(){visible=false;TrackingSyncJob.schedule(this);super.onStop();}
+    @Override public void onStart(){super.onStart();visible=true;TrackingControlProvider.setVisible(this,true);}
+    @Override public void onStop(){visible=false;TrackingControlProvider.setVisible(this,false);super.onStop();}
 
     @Override protected void onNewIntent(android.content.Intent intent) {
         setIntent(intent);

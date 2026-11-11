@@ -25,9 +25,13 @@
         </activity>
 
         <service android:name=".TripTrackerService" android:exported="false"
-            android:foregroundServiceType="location" android:stopWithTask="false" />
+            android:foregroundServiceType="location" android:stopWithTask="false" android:process=":tracking" />
 
-        <service android:name=".TrackingSyncJob" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE" />
+        <service android:name=".TrackingSyncJob" android:process=":tracking" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <provider android:name=".TrackingControlProvider"
+            android:authorities="${applicationId}.tracking.control"
+            android:exported="false" android:process=":tracking" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

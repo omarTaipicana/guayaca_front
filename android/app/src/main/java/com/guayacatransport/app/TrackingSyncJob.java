@@ -34,7 +34,7 @@ public final class TrackingSyncJob extends JobService {
     private volatile JobParameters running;
 
     static void configure(Context c,String url){
-        URI uri=URI.create(url);
+        URI uri=URI.create(url==null?"":url);
         if(!"https".equalsIgnoreCase(uri.getScheme())||uri.getHost()==null||uri.getUserInfo()!=null||uri.getQuery()!=null||uri.getFragment()!=null)
             throw new IllegalArgumentException("Se requiere la API HTTPS");
         c.getSharedPreferences("guayaca_tracking_config",MODE_PRIVATE).edit().putString("api",url.replaceAll("/+$","")).apply();
@@ -57,7 +57,7 @@ public final class TrackingSyncJob extends JobService {
     }
 
     @Override public boolean onStartJob(JobParameters job){
-        if(MainActivity.visible)return false;
+        if(TrackingControlProvider.uiVisible)return false;
         running=job;
         final long started=requests.get();
         new Thread(()->{
@@ -67,7 +67,7 @@ public final class TrackingSyncJob extends JobService {
             new Handler(Looper.getMainLooper()).post(()->{
                 if(running==job){
                     running=null;jobFinished(job,reschedule);
-                    if(!reschedule&&!MainActivity.visible&&requests.get()!=started)
+                    if(!reschedule&&!TrackingControlProvider.uiVisible&&requests.get()!=started)
                         new Handler(Looper.getMainLooper()).postDelayed(()->schedulePending(this),1500);
                 }
             });
@@ -86,12 +86,12 @@ public final class TrackingSyncJob extends JobService {
             db.delete("synced_web_gps","captured<?",new String[]{Long.toString(System.currentTimeMillis()-91L*86400000L)});
             Set<String> blocked=new HashSet<>();
             for(int i=0;i<80;i++){
-                if(running!=job||MainActivity.visible||!token.equals(GuayacaSessionPlugin.storedToken(this)))return false;
+                if(running!=job||TrackingControlProvider.uiVisible||!token.equals(GuayacaSessionPlugin.storedToken(this)))return false;
                 JSONObject nativePoint=nextPoint(db,owner,blocked),webPoint=oldestWebPoint(db,owner,blocked);
                 boolean fromWeb=webPoint!=null&&(nativePoint==null||webPoint.getString("captured_at").compareTo(nativePoint.getString("captured_at"))<=0);
                 JSONObject op=fromWeb?webPoint:nativePoint;
                 if(op==null){if(i==0&&blocked.isEmpty())return verifyActiveTrip(api,token,owner);return false;}
-                if(MainActivity.visible||running!=job)return false;
+                if(TrackingControlProvider.uiVisible||running!=job)return false;
                 String trip=op.getString("trip_id");
                 Reply reply=send(api,token,op);
                 if(reply.status==401){stopActiveFor(owner);return false;}
@@ -111,7 +111,7 @@ public final class TrackingSyncJob extends JobService {
                 JSONObject result=reply.body.optJSONObject("result");
                 if(result!=null&&(result.optBoolean("route_complete")||"cancelado".equals(result.optString("status"))))stopTracking(owner,trip);
             }
-            return !MainActivity.visible;
+            return !TrackingControlProvider.uiVisible;
         }
     }
 
@@ -168,7 +168,7 @@ public final class TrackingSyncJob extends JobService {
 
     private boolean verifyActiveTrip(String api,String token,String owner) throws Exception{
         TripTrackerService service=TripTrackerService.active;
-        if(service==null||!service.ownedBy(owner)||MainActivity.visible)return false;
+        if(service==null||!service.ownedBy(owner)||TrackingControlProvider.uiVisible)return false;
         String trip=service.tripId();
         HttpsURLConnection con=(HttpsURLConnection)URI.create(api+"/gps-session").toURL().openConnection();
         try{
